@@ -34,8 +34,8 @@ async function findSessionFile(id, directory = path.join(os.homedir(), ".pi", "a
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 try {
-  const launch = (project, extra = []) => execute(process.execPath, ["bin/dev.js", "--project", project, "--session", session, "--no-attach", ...extra]);
-  const upgrade = (project) => execute(process.execPath, ["bin/dev.js", "upgrade", "--project", project, "--session", session, "--no-attach"]);
+  const launch = (project, extra = []) => execute(process.execPath, ["bin/sanbi.js", "--project", project, "--session", session, "--no-attach", ...extra]);
+  const upgrade = (project) => execute(process.execPath, ["bin/sanbi.js", "upgrade", "--project", project, "--session", session, "--no-attach"]);
   launch(projectOne);
   const configOne = JSON.parse(await readFile(path.join(projectOne, ".agent/config.json"), "utf8"));
   let state = snapshot();
@@ -59,9 +59,9 @@ try {
 
   const warning = launch(projectOne);
   assert.match(warning, /Agent infrastructure update available/);
-  assert.equal(await readFile(path.join(projectOne, ".agent/protocol.md"), "utf8"), "legacy protocol\n", "normal dev must not overwrite outdated infrastructure");
+  assert.equal(await readFile(path.join(projectOne, ".agent/protocol.md"), "utf8"), "legacy protocol\n", "normal sanbi must not overwrite outdated infrastructure");
 
-  const refused = spawnSync(process.execPath, ["bin/dev.js", "upgrade", "--project", projectOne, "--session", session, "--no-attach"], { cwd: sourceRoot, encoding: "utf8", windowsHide: true });
+  const refused = spawnSync(process.execPath, ["bin/sanbi.js", "upgrade", "--project", projectOne, "--session", session, "--no-attach"], { cwd: sourceRoot, encoding: "utf8", windowsHide: true });
   assert.notEqual(refused.status, 0);
   assert.match(refused.stderr, /cannot upgrade while an active task exists/);
   assert.equal(await readFile(path.join(projectOne, ".agent/protocol.md"), "utf8"), "legacy protocol\n");

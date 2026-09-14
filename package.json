@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "bin": {
-    "dev": "bin/dev.js"
+    "sanbi": "bin/sanbi.js"
   },
   "scripts": {
-    "dev": "node bin/dev.js",
+    "sanbi": "node bin/sanbi.js",
     "test": "node --test test/*.test.js",
     "test:integration": "node test/herdr.integration.js"
   },

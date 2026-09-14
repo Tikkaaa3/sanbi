@@ -409,7 +409,7 @@ cd /path/to/project
 
 The final command name is not decided yet.
 
-A placeholder such as `dev` may be used during implementation.
+A placeholder such as `sanbi` may be used during implementation.
 
 The command should result in:
 
@@ -488,7 +488,7 @@ Protocol-Version: 1
 Context-Version: 1
 ```
 
-Explicit managed-infrastructure upgrades use `dev upgrade`. Normal `dev` retains the preserve rule and only warns when `.agent/scaffold-version` is legacy or outdated. Upgrade is refused while any task is active, backs up replaced managed files under `.agent/upgrade-backups/`, preserves project-owned state, and refreshes both role sessions in the existing panes.
+Explicit managed-infrastructure upgrades use `sanbi upgrade`. Normal `sanbi` retains the preserve rule and only warns when `.agent/scaffold-version` is legacy or outdated. Upgrade is refused while any task is active, backs up replaced managed files under `.agent/upgrade-backups/`, preserves project-owned state, and refreshes both role sessions in the existing panes.
 
 ---
 
@@ -3068,7 +3068,7 @@ Create if missing:
 .pi/extensions/lifecycle.ts
 ```
 
-Do not overwrite existing copies in normal V1 operation. New adoptions also receive `.agent/scaffold-version`. Legacy/outdated projects are reported but remain unchanged until the owner runs `dev upgrade` with no active task.
+Do not overwrite existing copies in normal V1 operation. New adoptions also receive `.agent/scaffold-version`. Legacy/outdated projects are reported but remain unchanged until the owner runs `sanbi upgrade` with no active task.
 
 ---
 
@@ -3360,8 +3360,8 @@ V1 implementation should preserve these invariants:
 13. Coder reports are not treated as proof without Lead review.
 14. Warm reopening a project must not reset active sessions.
 15. Init must not overwrite existing canonical agent files silently.
-16. Normal `dev` must never auto-upgrade managed infrastructure.
-17. `dev upgrade` must refuse active tasks, back up replaced managed files, preserve project-owned state, reuse panes, and rotate both roles to fresh context.
+16. Normal `sanbi` must never auto-upgrade managed infrastructure.
+17. `sanbi upgrade` must refuse active tasks, back up replaced managed files, preserve project-owned state, reuse panes, and rotate both roles to fresh context.
 
 ---
 
@@ -3553,10 +3553,10 @@ The system is ready for normal local experimentation when all of the following a
 - [ ] Running it inside an existing repository does not modify application files.
 - [ ] Re-running it is idempotent.
 - [ ] New projects receive the current scaffold-version marker.
-- [ ] Normal `dev` warns about outdated infrastructure without overwriting it.
-- [ ] `dev upgrade` refuses active tasks and preserves project-owned/application files.
-- [ ] `dev upgrade` backs up replaced managed files and reuses the existing workspace/panes with fresh role sessions.
-- [ ] Re-running `dev upgrade` when current is a no-op.
+- [ ] Normal `sanbi` warns about outdated infrastructure without overwriting it.
+- [ ] `sanbi upgrade` refuses active tasks and preserves project-owned/application files.
+- [ ] `sanbi upgrade` backs up replaced managed files and reuses the existing workspace/panes with fresh role sessions.
+- [ ] Re-running `sanbi upgrade` when current is a no-op.
 - [ ] Each project gets a stable Herdr workspace.
 - [ ] Multiple projects can coexist in Herdr.
 - [ ] Project workspace has two panes: Lead and Coder.

@@ -130,7 +130,7 @@ export async function assertRuntimeUpgradeSafe(adopted, options = {}) {
   const managed = agents.filter((agent) => names.includes(agent.name));
   const callerPane = process.env.HERDR_PANE_ID;
   if (callerPane && managed.some((agent) => agent.pane_id === callerPane)) {
-    throw new Error("run dev upgrade outside the managed Lead/Coder Pi panes so they can be restarted safely");
+    throw new Error("run sanbi upgrade outside the managed Lead/Coder Pi panes so they can be restarted safely");
   }
   const unsafe = managed.filter((agent) => !["idle", "done"].includes(agent.agent_status));
   if (unsafe.length) throw new Error(`cannot upgrade while managed Pi runtime is not idle: ${unsafe.map((agent) => `${agent.name}=${agent.agent_status}`).join(", ")}`);

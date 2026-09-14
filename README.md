@@ -15,18 +15,30 @@ Verify the integration with:
 herdr integration status
 ```
 
-## Run locally
+## Install the command
 
-From the project you want to adopt, run the bootstrap by absolute or relative path:
+From this source repository:
 
 ```bash
-node C:/Users/tikka/Workspace/setup/bin/dev.js
+npm link
 ```
 
-For development from this source repository, an explicit target avoids adopting the tool itself:
+Then open or adopt any project from its root:
 
 ```bash
-npm run dev -- --project C:/path/to/project
+sanbi
+```
+
+Upgrade an already-adopted project explicitly with:
+
+```bash
+sanbi upgrade
+```
+
+For development without linking globally:
+
+```bash
+npm run sanbi -- --project C:/path/to/project
 ```
 
 The command creates missing infrastructure, saves Pi trust for the adopted project, creates or recovers its workspace in the default Herdr session, starts its Lead and Coder Pi processes, focuses the workspace, and attaches Herdr when called outside Herdr. It does not overwrite existing infrastructure files. New projects receive `.agent/scaffold-version`; legacy projects are opened unchanged with an upgrade warning.
@@ -43,13 +55,13 @@ Useful development options:
 
 ## Explicit infrastructure upgrades
 
-Normal `dev` startup never replaces existing infrastructure. To explicitly migrate an adopted project when no task is active:
+Normal `sanbi` startup never replaces existing infrastructure. To explicitly migrate an adopted project when no task is active:
 
 ```bash
-node C:/Users/tikka/Workspace/setup/bin/dev.js upgrade
+sanbi upgrade
 ```
 
-`dev upgrade` compares the installed scaffold with the current canonical managed files, backs up changed existing files under `.agent/upgrade-backups/`, installs the canonical files, updates `.agent/scaffold-version`, and restarts both Pi roles with fresh `lead/inbox` and `coder/idle` sessions in the existing panes. Run it from a normal terminal outside those managed Pi panes so they can exit safely. It refuses while any task has `active: true` and has no force option.
+`sanbi upgrade` compares the installed scaffold with the current canonical managed files, backs up changed existing files under `.agent/upgrade-backups/`, installs the canonical files, updates `.agent/scaffold-version`, and restarts both Pi roles with fresh `lead/inbox` and `coder/idle` sessions in the existing panes. Run it from a normal terminal outside those managed Pi panes so they can exit safely. It refuses while any task has `active: true` and has no force option.
 
 Managed files are the protocol, Lead/Coder roles, templates, and lifecycle extension. Project context, task/result/review/handoff artifacts, and application files are never overwritten. Running the command when already current is a no-op and does not restart sessions.
 
