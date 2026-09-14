@@ -1,0 +1,17 @@
+{
+  "name": "local-agentic-development",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "dev": "bin/dev.js"
+  },
+  "scripts": {
+    "dev": "node bin/dev.js",
+    "test": "node --test test/*.test.js",
+    "test:integration": "node test/herdr.integration.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
