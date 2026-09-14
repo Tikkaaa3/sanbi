@@ -36,10 +36,13 @@ test("adopts an empty directory and creates the canonical V1 infrastructure", as
   const protocol = await readFile(path.join(root, ".agent/protocol.md"), "utf8");
   assert.match(lifecycle, /registerCommand\("execute"/);
   assert.match(lifecycle, /registerCommand\("next"/);
+  assert.match(lifecycle, /pi\.on\("agent_settled"/);
+  assert.match(lifecycle, /is ready for review\. Read \.agent\/results/);
   assert.match(leadRole, /Only the deterministic `\/execute` lifecycle command may transition `READY -> CODING`/);
   assert.match(leadRole, /phrases such as “sounds good,” “okay,” or “that works”/);
   assert.match(protocol, /`BLOCKED -> CODING`/);
   assert.match(protocol, /`REVIEW -> CODING`/);
+  assert.match(protocol, /notifications are sent automatically by the lifecycle extension/);
   assert.deepEqual(result.config.roles.lead, { model: "openai-codex/gpt-5.6-sol", thinking: "high" });
   assert.deepEqual(result.config.roles.coder, { model: "openai-codex/gpt-5.6-sol", thinking: "low" });
 });

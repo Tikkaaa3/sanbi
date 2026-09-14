@@ -90,6 +90,8 @@ The generated `.pi/extensions/lifecycle.ts` provides:
 
 A Lead must stop after preparing and summarizing a `READY` task. Only the owner invoking `/execute` starts initial implementation. `/execute` writes `CODING` before signalling so Coder always reads an authorized state, and rolls back to `READY` if Herdr rejects the invocation. It does not wait for implementation.
 
+When Coder settles after transitioning the active task to `BLOCKED` or `REVIEW`, the lifecycle extension automatically sends the canonical Herdr notification to Lead. This does not depend on Coder discovering a model-callable Herdr tool.
+
 `/next` resets Coder first, waits for an acknowledgement, atomically changes the task to `active: false`, and finally creates a fresh Lead session. Panes and Pi processes remain in place.
 
 Herdr agent names use a sanitized, truncated folder name plus an eight-character path hash. They remain within Herdr's 32-character limit while avoiding collisions between same-named directories.

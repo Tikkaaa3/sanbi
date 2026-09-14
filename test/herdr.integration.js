@@ -68,7 +68,7 @@ try {
   await writeFile(activeUpgradeTask, "---\nid: T-099\nstatus: DONE\nactive: false\n---\n# Inactive upgrade guard\n");
 
   const upgradedOutput = upgrade(projectOne);
-  assert.match(upgradedOutput, /Upgraded agent infrastructure: 1 -> 2/);
+  assert.match(upgradedOutput, /Upgraded agent infrastructure: 1 -> 3/);
   assert.match(await readFile(path.join(projectOne, ".pi/extensions/lifecycle.ts"), "utf8"), /registerCommand\("execute"/);
   assert.match(await readFile(path.join(projectOne, ".agent/roles/lead.md"), "utf8"), /READY` means you believe/);
   assert.equal(await readFile(path.join(projectOne, ".agent/project.md"), "utf8"), "preserved project context\n");
@@ -162,6 +162,14 @@ try {
     if (lead?.agent_status !== "working" && coder?.agent_status !== "working") break;
     await sleep(200);
   }
+
+  const leadSessionPath = await findSessionFile(firstIds[configOne.herdr.leadAgent]);
+  const leadEntries = (await readFile(leadSessionPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const leadUserMessages = leadEntries
+    .filter((entry) => entry.type === "message" && entry.message?.role === "user")
+    .map((entry) => typeof entry.message.content === "string" ? entry.message.content : entry.message.content?.filter((part) => part.type === "text").map((part) => part.text).join("\n"))
+    .join("\n");
+  assert.match(leadUserMessages, /T-001 is ready for review\. Read \.agent\/results\/T-001\.md\./, "Coder REVIEW must automatically notify Lead through Herdr");
 
   const doneTask = taskWith("T-001", "DONE");
   const handoff = `---\ntask: T-001\n---\n# Handoff — T-001\n\n## Completed\nIntegration fixture.\n`;

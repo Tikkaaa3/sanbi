@@ -88,6 +88,8 @@ The Coder may change only execution-owned metadata such as the `status` field. I
 
 Use **Herdr for signalling**, not as durable task storage.
 
+Coder-to-Lead `BLOCKED` and `REVIEW` notifications are sent automatically by the lifecycle extension after Coder settles in the new state. Coder must first finish the result artifact and status transition, then end its turn. This does not require a model-callable Herdr tool.
+
 Messages should normally be short and reference authoritative files.
 
 Example Lead to Coder:

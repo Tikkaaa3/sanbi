@@ -102,7 +102,7 @@ When blocked:
 2. clearly explain the blocker and relevant findings
 3. list concrete options when useful
 4. change task status from `CODING` to `BLOCKED`
-5. notify the Lead through Herdr
+5. finish the turn so the lifecycle extension can automatically notify Lead through Herdr
 
 Do not continue making speculative implementation changes while blocked.
 
@@ -116,11 +116,13 @@ Before requesting review:
 4. update the result artifact accurately
 5. record meaningful deviations or unresolved risks
 6. change task status from `CODING` to `REVIEW`
-7. notify the Lead
+7. finish the turn so the lifecycle extension can automatically notify Lead
 
-Typical notification:
+The lifecycle extension sends the canonical notification:
 
 `T-043 is ready for review. Read .agent/results/T-043.md.`
+
+Do not claim signalling is unavailable merely because there is no model-callable Herdr tool. Notification is lifecycle infrastructure and runs automatically after the agent settles.
 
 ## Rework
 
@@ -133,7 +135,7 @@ If the Lead requests changes:
 5. re-run verification
 6. update the existing result artifact
 7. return the task to `REVIEW`
-8. notify the Lead again
+8. finish the turn; the lifecycle extension automatically notifies Lead again
 
 Do not create a new task or redefine the existing contract yourself.
 

@@ -95,6 +95,7 @@ function fail(ctx: any, message: string): void {
 
 export default function lifecycle(pi: ExtensionAPI) {
   let identityPromise: Promise<Identity> | undefined;
+  let observedCoderState: string | undefined;
   const identity = (cwd: string): Promise<Identity> => identityPromise ??= (async () => {
     const config = JSON.parse(await readRequired(join(cwd, ".agent", "config.json")));
     let role = process.env.LAD_AGENT_ROLE === "lead" || process.env.LAD_AGENT_ROLE === "coder"
@@ -117,6 +118,7 @@ export default function lifecycle(pi: ExtensionAPI) {
     try {
       const agent = await identity(ctx.cwd);
       const active = await activeTask(ctx.cwd);
+      if (agent.role === "coder") observedCoderState = active ? `${active.id}:${active.status}` : undefined;
       if (!pi.getSessionName()) {
         pi.setSessionName(active ? `${agent.project}/${agent.role}/${active.id}` : `${agent.project}/${agent.role}/${agent.role === "lead" ? "inbox" : "idle"}`);
       }
@@ -136,6 +138,7 @@ export default function lifecycle(pi: ExtensionAPI) {
     try {
       const agent = await identity(ctx.cwd);
       const active = await activeTask(ctx.cwd);
+      if (agent.role === "coder") observedCoderState = active ? `${active.id}:${active.status}` : undefined;
       const expected = active ? `${agent.project}/${agent.role}/${active.id}` : `${agent.project}/${agent.role}/${agent.role === "lead" ? "inbox" : "idle"}`;
       if (pi.getSessionName() !== expected) pi.setSessionName(expected);
       const role = await readRequired(join(ctx.cwd, ".agent", "roles", `${agent.role}.md`));
@@ -144,6 +147,30 @@ export default function lifecycle(pi: ExtensionAPI) {
       return { systemPrompt: `${event.systemPrompt}\n\n${role}\n\n${protocol}\n\n${runtime}` };
     } catch (error: any) {
       ctx.ui.notify(`Lifecycle context refresh failed: ${error.message}`, "error");
+    }
+  });
+
+  pi.on("agent_settled", async (_event, ctx) => {
+    try {
+      const agent = await identity(ctx.cwd);
+      if (agent.role !== "coder") return;
+      const active = await activeTask(ctx.cwd);
+      const current = active ? `${active.id}:${active.status}` : undefined;
+      const changed = current !== observedCoderState;
+      observedCoderState = current;
+      if (!active || !changed || (active.status !== "BLOCKED" && active.status !== "REVIEW")) return;
+
+      const message = active.status === "BLOCKED"
+        ? `${active.id} is BLOCKED. Read .agent/results/${active.id}.md.`
+        : `${active.id} is ready for review. Read .agent/results/${active.id}.md.`;
+      const sent = await pi.exec("herdr", ["agent", "prompt", agent.peer, message], { timeout: 10_000 });
+      if (sent.code !== 0) {
+        ctx.ui.notify(`Automatic Lead notification failed: ${(sent.stderr || sent.stdout).trim()}`, "error");
+      } else {
+        ctx.ui.notify(`${active.id} ${active.status} notification sent to Lead`, "info");
+      }
+    } catch (error: any) {
+      ctx.ui.notify(`Automatic Lead notification failed: ${error.message}`, "error");
     }
   });
 

@@ -5,7 +5,7 @@ import { agentNames, canonicalProjectRoot, deriveProjectKey } from "./project.js
 
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SCAFFOLD_ROOT = path.join(SOURCE_ROOT, "scaffold");
-export const CURRENT_SCAFFOLD_VERSION = 2;
+export const CURRENT_SCAFFOLD_VERSION = 3;
 const VERSION_FILE = ".agent/scaffold-version";
 const MANAGED_FILES = [
   ".agent/protocol.md",

@@ -649,6 +649,8 @@ The Coder may change only execution-owned metadata such as the `status` field. I
 
 Use **Herdr for signalling**, not as durable task storage.
 
+Coder-to-Lead `BLOCKED` and `REVIEW` notifications are sent automatically by the lifecycle extension after Coder settles in the new state. Coder must first finish the result artifact and status transition, then end its turn. This does not require a model-callable Herdr tool.
+
 Messages should normally be short and reference authoritative files.
 
 Example Lead to Coder:
@@ -1077,7 +1079,7 @@ When blocked:
 2. clearly explain the blocker and relevant findings
 3. list concrete options when useful
 4. change task status from `CODING` to `BLOCKED`
-5. notify the Lead through Herdr
+5. finish the turn so the lifecycle extension can automatically notify Lead through Herdr
 
 Do not continue making speculative implementation changes while blocked.
 
@@ -1091,11 +1093,13 @@ Before requesting review:
 4. update the result artifact accurately
 5. record meaningful deviations or unresolved risks
 6. change task status from `CODING` to `REVIEW`
-7. notify the Lead
+7. finish the turn so the lifecycle extension can automatically notify Lead
 
-Typical notification:
+The lifecycle extension sends the canonical notification:
 
 `T-043 is ready for review. Read .agent/results/T-043.md.`
+
+Do not claim signalling is unavailable merely because there is no model-callable Herdr tool. Notification is lifecycle infrastructure and runs automatically after the agent settles.
 
 ## Rework
 
@@ -1108,7 +1112,7 @@ If the Lead requests changes:
 5. re-run verification
 6. update the existing result artifact
 7. return the task to `REVIEW`
-8. notify the Lead again
+8. finish the turn; the lifecycle extension automatically notifies Lead again
 
 Do not create a new task or redefine the existing contract yourself.
 
@@ -1729,6 +1733,8 @@ The selected communication design is:
 
 > **Herdr messages wake/control agents. Filesystem artifacts carry authoritative details.**
 
+Coder-to-Lead `BLOCKED` and `REVIEW` signals are emitted deterministically by the lifecycle extension when Coder settles after changing state. This avoids depending on Coder discovering or correctly invoking a model-callable Herdr tool. Lead-to-Coder delegation and continuation retain the existing Herdr mechanism.
+
 This is intentionally neither message-only nor file-polling-only.
 
 ---
@@ -2149,7 +2155,7 @@ If Coder encounters a material blocker:
    ```yaml
    status: BLOCKED
    ```
-4. notify Lead.
+4. finish the Coder turn; the lifecycle extension automatically notifies Lead through Herdr.
 
 Result should explain:
 
@@ -2186,7 +2192,7 @@ When implementation is complete, Coder:
    ```yaml
    status: REVIEW
    ```
-5. notifies Lead.
+5. finishes its turn; the lifecycle extension automatically notifies Lead through Herdr.
 
 Coder session remains alive.
 
@@ -3470,7 +3476,7 @@ Test:
 
 ```text
 Lead → Coder prompt
-Coder → Lead prompt
+Coder state BLOCKED/REVIEW → automatic lifecycle notification → Lead prompt
 ```
 
 without custom `devctl`.
