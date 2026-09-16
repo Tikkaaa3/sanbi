@@ -3,7 +3,7 @@
 **Status:** Planning complete for V1  
 **Purpose:** Implementation brief for building and testing the local development setup  
 **Primary tools:** Herdr, Pi, Codex-subscription-backed models through Pi  
-**Future integration:** Hermes for Telegram/automation/research, Matt Pocock skills, optional stronger enforcement and lifecycle tooling
+**Current extension:** role-aware Sanbi-adapted skills; **future integration:** Hermes for Telegram/automation/research and optional stronger enforcement
 
 ---
 
@@ -72,7 +72,7 @@ V1 should provide all of the following:
    - open two panes,
    - start or restore the Lead and Coder Pi processes,
    - ensure both panes use the current project root as their working directory.
-3. Lead and Coder are separate persistent Pi processes/sessions, not a Lead with a Coder subagent.
+3. Lead and Coder are separate persistent Pi processes/sessions, not a Lead with a Coder subagent. Each parent Pi may host ephemeral application-non-writing Subagent V2 specialist sessions in-process; Herdr never creates panes or agents for them.
 4. The owner primarily interacts with Lead.
 5. Lead delegates implementation to Coder through Herdr.
 6. Coder can work asynchronously for minutes or hours without keeping a Lead LLM inference running.
@@ -108,7 +108,7 @@ V1 intentionally does **not** include:
 - automatic architecture generation,
 - automatic project creation,
 - automatic Git initialization,
-- Matt Pocock skill installation/configuration,
+- bulk installation of an external skill repository,
 - final model/provider configuration,
 - complex cold-recovery orchestration,
 - a custom project-management system.
@@ -251,7 +251,8 @@ Coder is **not** a Lead subagent.
 - Coder results,
 - Lead reviews,
 - Lead handoffs,
-- reusable templates.
+- reusable templates,
+- Sanbi-managed role-specific and shared Pi skills.
 
 The filesystem survives:
 
@@ -512,8 +513,15 @@ project-root/
 │   │   ├── task.md
 │   │   ├── result.md
 │   │   ├── review.md
-│   │   └── handoff.md
+│   │   ├── handoff.md
+│   │   └── initiative.md
 │   │
+│   ├── skills/                   # Sanbi-managed; explicitly loaded by role
+│   │   ├── lead/
+│   │   ├── coder/
+│   │   └── shared/
+│   │
+│   ├── initiatives/              # optional project-owned multi-task context
 │   ├── tasks/
 │   ├── results/
 │   ├── reviews/
@@ -537,6 +545,18 @@ Future versions may migrate task artifacts into per-task directories:
 
 But **V1 intentionally does not do this**.
 
+The role-aware loader currently installs Lead-only `grilling`, `grill-with-docs`, `domain-modeling`, `writing-for-agents`, `grill-me`, `wait-what`, `to-questionnaire`, `retro`, `to-spec`, `to-tickets`, `to-task`, and `code-review`; Coder-only `tdd` and `diagnosing-bugs`; and shared `codebase-design`. These are canonical Sanbi-managed scaffold resources and are additive to Pi's global skills.
+
+Planning Flow V2 makes artifact transitions owner-controlled. Small work follows `discussion → optional grilling → /to-task → READY → /execute`. Multi-task work follows `discussion → grill-with-docs → /to-spec → initiative → /to-tickets → Work Map → select one item → /to-task → READY → /execute`. Grilling recommends a path but creates no task or initiative; future tasks are never bulk-created.
+
+Runtime & UX cleanup preserves those transitions while moving routine signaling behind `sanbi_signal_coder`/automatic `sanbi_signal_lead` transport, caching a single `VCS: git|none` probe per parent process, and directing disposable browser/runtime artifacts to `SANBI_RUNTIME_TEMP` under the OS temp directory through marker-checked runtime tools. V11 adds `sanbi_runtime_process` for owned task-local verification process trees, readiness, OS-temp logs, explicit stop, and bounded shutdown cleanup. Non-Git review uses result-reported and current-file evidence without repeated Git commands. Early discovery defaults to targeted facts and checks rather than reflexive full-suite verification. Behavioral implementation follows observable focused RED → GREEN where a meaningful seam exists; substantial review dispatches axis reviewers before exhaustive Lead source reading.
+
+## 10.1 Subagent V2
+
+Herdr owns only the persistent top-level Lead/Coder processes. Each parent Pi owns at most three concurrent ephemeral in-process `AgentSession` children and exposes them through `/subagents`, never Herdr panes. Lead's hard registry is `scout` (Luna/medium), `researcher` (Terra/medium), and `reviewer` (Sol/high). Coder's is `scout`, `researcher`, and `diagnostic-scout` (Sol/medium).
+
+Definitions live in `.agent/subagents/{shared,lead,coder}` and executable management in `.pi/extensions/sanbi-subagents.ts`. Children use separate persisted session files, fresh context, exact role-scoped tool sets, explicit models, trust-gated resources, and no Pi write/edit, delegation, lifecycle, or owner-interaction tools. Reviewer and Diagnostic Scout retain `bash` for verification and reproduction, so the non-writing boundary is instruction-enforced rather than an OS sandbox. The shared researcher requires the existing `pi-web-access` tools and startup fails clearly if they are unavailable. `/subagents on|off|toggle|status` retains the global toggle; bare `/subagents` opens the Pi-native dashboard. Inspect defaults to a semantic CURRENT/ACTIVITY/LATEST view built solely from observed events, collapsing tool starts/results into mutable rows and hiding the full prompt. `d` exposes retained raw transcript/tool detail and `p` toggles the delegated prompt. These views make no LLM calls and inject no parent-context messages. Only active children create the temporary running widget.
+
 ---
 
 # 11. Artifact Ownership
@@ -546,7 +566,11 @@ But **V1 intentionally does not do this**.
 | `.agent/protocol.md` | init/bootstrap | infrastructure, not normal agents |
 | `.agent/roles/lead.md` | init/bootstrap | infrastructure, not normal agents |
 | `.agent/roles/coder.md` | init/bootstrap | infrastructure, not normal agents |
+| `.agent/skills/{lead,coder,shared}/**` | init/bootstrap or upgrade | infrastructure, not normal agents |
+| `.agent/subagents/{lead,coder,shared}/**` | init/bootstrap or upgrade | infrastructure, not normal agents |
+| `.pi/extensions/sanbi-subagents.ts` and `.pi/sanbi/subagent-ui.js` | init/bootstrap or upgrade | infrastructure, not normal agents |
 | `.agent/project.md` | init placeholder | Lead |
+| `.agent/initiatives/I-xxx-<slug>.md` | Lead, lazily | Lead |
 | `.agent/tasks/T-xxx.md` | Lead | Lead; Coder may update execution status only |
 | `.agent/results/T-xxx.md` | Coder | Coder |
 | `.agent/reviews/T-xxx.md` | Lead | Lead |
@@ -590,6 +614,50 @@ Herdr messages are used to wake, control, and notify agents. Detailed task state
 10. Task readiness and owner authorization are separate: `READY` does not authorize implementation.
 11. Only the owner-invoked `/execute` command may perform the initial `READY -> CODING` transition and invoke Coder.
 12. A completed task is rotated to fresh Lead and Coder sessions through `/next`.
+13. Initiatives are optional multi-task planning artifacts. They do not authorize implementation or replace task contracts.
+14. At most one initiative may have status `ACTIVE`; `DRAFT` and `PAUSED` initiatives may coexist.
+15. Shared understanding does not authorize artifact creation. Natural-language agreement is not `/to-spec`, `/to-tickets`, `/to-task`, or `/execute`.
+16. Lead recommends a planning shape; only an explicit owner-invoked planning command crosses that boundary.
+17. `/to-task` is the only normal skill-level path that creates one new implementation task.
+
+## Planning Transitions
+
+Discussion, grilling, domain modeling, architecture discussion, and initiative discussion may clarify decisions but never create a task automatically.
+
+For one coherent implementation outcome:
+
+```text
+discussion → optional grilling → owner /to-task → one READY task → owner /execute
+```
+
+For multi-task work:
+
+```text
+discussion → grill-with-docs → owner /to-spec → initiative → owner /to-tickets → Work Map → owner selects one item through /to-task → one READY task → owner /execute
+```
+
+Lead must classify the likely shape and recommend the next command, then stop. Lead does not infer any planning transition from “yes,” “sounds good,” “okay,” answers to questions, or apparent requirement completeness. `/to-spec`, `/to-tickets`, and `/to-task` are user-invoked only and must never invoke one another automatically.
+
+A proposed task is valid only when it has one primary objective and coherent behavioral outcome, fits one fresh Coder context, produces one reviewable delta, and can complete independently with meaningful verification. If it could naturally split into independently useful outcomes that land green separately, it is too broad for one task and should route to `/to-spec` or Work Map revision. Never create a mega-task or silently create several tasks.
+
+## Initiative Planning
+
+An initiative in `.agent/initiatives/I-xxx-<slug>.md` records a durable multi-task outcome and evolving Work Map. Initiative IDs are sequential and independent from task IDs. Allowed initiative statuses are `DRAFT`, `ACTIVE`, `PAUSED`, and `DONE`; status changes to `ACTIVE` or `PAUSED` require explicit owner intent.
+
+Work items use initiative-local IDs `W1`, `W2`, ... and statuses `PLANNED`, `READY`, `DONE`, or `DROPPED`. `PLANNED` includes unblocked frontier candidates. `READY` means `/to-task` has created and linked the item's actual just-in-time task; it is still not executable authorization. The selected slice carries its `Sanbi task: T-xxx` reference until reviewed completion makes it `DONE`. `DROPPED` requires an intentional planning decision. The Work Map may evolve as implementation reveals new facts.
+
+Lead may mark an initiative `DONE` only with owner agreement, after its intended outcome and appropriate verification are complete, required work items are `DONE` or explicitly `DROPPED`, and no material Open Questions remain for its declared scope. An empty frontier alone does not imply completion.
+
+When no implementation task is active, Lead may inspect the active initiative frontier and recommend a next item. Only owner-invoked `/to-task` may select and convert one coherent unblocked work item into a normal task contract just in time. An initiative-linked task adds optional frontmatter:
+
+```yaml
+initiative: I-001
+work_item: W2
+```
+
+After the owner approves `/to-task`'s compact proposal, Lead creates exactly one task directly as `READY`, marks only the selected Work Map item `READY`, and adds the resulting `T-xxx` reference. Never create a second task for an item that already has a Sanbi task reference; reconcile that task first. Standalone tasks omit linkage and remain fully valid. Initiative creation, Work Map approval, and task creation do not authorize execution: only owner-invoked `/execute` performs `READY -> CODING`.
+
+Lead owns initiative files. Coder may read a relevant initiative but does not change its Work Map, decisions, status, future-item state, or progress. Coder reports implementation findings through the normal result artifact for Lead to reconcile.
 
 ## Task State
 
@@ -612,7 +680,7 @@ At most one task may have `active: true`.
 
 A task remains active after reaching `DONE` until `/next` successfully rotates the sessions.
 
-`READY` means the Lead considers the contract complete enough to implement. It is a waiting state, not owner authorization. Lead must summarize the ready task and wait for the owner to invoke `/execute`.
+`READY` means the owner approved `/to-task`'s proposed contract shape and Lead wrote the implementation contract. It is a waiting state, not execution authorization. Lead must summarize the ready task and wait for the owner to invoke `/execute`.
 
 ## State Ownership
 
@@ -647,9 +715,9 @@ The Coder may change only execution-owned metadata such as the `status` field. I
 
 ## Communication
 
-Use **Herdr for signalling**, not as durable task storage.
+Herdr remains the signalling transport, not durable task storage. Routine models use Sanbi semantic actions rather than discovering Herdr agent names or CLI syntax.
 
-Coder-to-Lead `BLOCKED` and `REVIEW` notifications are sent automatically by the lifecycle extension after Coder settles in the new state. Coder must first finish the result artifact and status transition, then end its turn. This does not require a model-callable Herdr tool.
+`/execute` generates the canonical start signal. Lead uses `sanbi_signal_coder` for BLOCKED continuation or REVIEW rework; that action owns the state transition, peer resolution, canonical message, transport, and guarded rollback. Coder-to-Lead `BLOCKED` and `REVIEW` notifications are sent automatically by the lifecycle extension after Coder settles in the new state, with `sanbi_signal_lead` available only for explicit retry. Models must not use raw Herdr discovery/help commands for these routine paths.
 
 Messages should normally be short and reference authoritative files.
 
@@ -695,6 +763,14 @@ Any meaningful deviation requires the Coder to stop and request Lead approval.
 
 Use this for sensitive migrations, protocols, security-sensitive changes, or other tightly constrained work.
 
+## Engineering Disciplines
+
+Coder may use the `tdd` and `diagnosing-bugs` skills inside an authorized task. Testing or diagnosis that exposes a material architecture, public-interface, behavior, acceptance, or scope decision routes through the existing BLOCKED flow to Lead; Coder does not ask the owner directly. Non-implementing diagnostic subagents are optional evidence-gathering assistants and never implement fixes.
+
+Lead may use `code-review` during `REVIEW`, optionally with fresh non-writing `reviewer` subagents for separate Contract and Standards passes. The active task contract remains the binding specification. Lead writes the existing review artifact and remains prohibited from modifying source or tests.
+
+Subagent V2 specialists are isolated, application-non-writing evidence gatherers inside the parent Pi process. Lead has `scout`, `researcher`, and `reviewer`; Coder has `scout`, `researcher`, and `diagnostic-scout`. They receive filesystem context pointers, not automatic parent transcript clones, and cannot delegate recursively or exercise lifecycle authority.
+
 ## Blocking
 
 The Coder must stop rather than guess when:
@@ -727,11 +803,16 @@ If changes are required:
 - Lead notifies Coder
 - the same Coder session continues
 
-If approved:
+There is no separate `REWORK` state.
 
-- Lead marks the task `DONE`
+If approved, before the final task status transition:
+
+- for an initiative-linked task, Lead marks the referenced work item `DONE`, retains its Sanbi task reference, records only meaningful initiative-level progress, and identifies—but does not automatically promote—the newly unblocked frontier
 - Lead updates stable project context if necessary
 - Lead writes the handoff
+- Lead marks the task `DONE` last, so an active `DONE` task always has its required durable handoff and initiative reconciliation
+
+Completion does not automatically create the next task. Future slice selection normally remains for the fresh Lead after `/next`.
 
 ## Artifact Ownership
 
@@ -741,6 +822,7 @@ If approved:
 - `.agent/tasks/*.md`
 - `.agent/reviews/*.md`
 - `.agent/handoffs/*.md`
+- `.agent/initiatives/*.md`
 
 Except that the Coder may update the execution `status` field in the active task.
 
@@ -749,6 +831,22 @@ Except that the Coder may update the execution `status` field in the active task
 - application implementation
 - application tests
 - `.agent/results/*.md`
+
+### Sanbi manages
+
+- `.agent/protocol.md`
+- `.agent/roles/**`
+- `.agent/templates/**`
+- `.agent/skills/**`
+- `.agent/subagents/**`
+- `.agent/.runtime/.gitignore`
+- `.pi/extensions/lifecycle.ts`
+- `.pi/extensions/sanbi-subagents.ts`
+- `.pi/sanbi/subagent-ui.js`
+- `.pi/sanbi/runtime-temp.js`
+- `.pi/sanbi/runtime-process.js`
+
+Project agents may propose improvements to these resources but do not rewrite them during normal project work. Lead may maintain project-owned documentation such as `CONTEXT.md` and qualifying ADRs under `docs/adr/`; Lead still does not write application or test source.
 
 ## Session Lifecycle
 
@@ -789,7 +887,8 @@ Your primary responsibilities are:
 - inspect and understand the repository
 - perform research when necessary
 - reason about architecture and tradeoffs
-- turn agreed work into explicit task contracts
+- maintain optional initiative plans for coherent multi-task outcomes
+- recommend the planning shape and, only through owner-invoked `/to-task`, turn one selected work item or standalone change into a task contract
 - delegate implementation to the Coder
 - independently verify implementation
 - review and accept or reject work
@@ -813,10 +912,15 @@ The Coder may use a less capable or lower-effort model. Therefore, do not delega
 - run typecheck
 - run lint
 - run diagnostics
-- write or update `.agent/**`
+- during early discovery, prefer repository facts, targeted source inspection, scout/research, and only checks that answer a concrete question; reserve reflexive full test/typecheck/lint/build suites for baseline preparation, review, reproduction, owner request, or repository-health questions
+- write or update project-owned `.agent/project.md`, reviews, and handoffs
+- create an initiative only through owner-invoked `/to-spec`
+- create or revise a Work Map only through owner-invoked `/to-tickets`
+- create one task only through owner-invoked `/to-task`
 - write research Markdown
 - write architecture documentation
-- write ADRs or other non-implementation documentation
+- write or update the domain glossary in `CONTEXT.md`
+- write ADRs under `docs/adr/` or other non-implementation documentation
 - ask the Coder to add, change, or improve tests
 - return work to the Coder for rework
 
@@ -827,9 +931,14 @@ The Coder may use a less capable or lower-effort model. Therefore, do not delega
 - write test source code
 - modify test source code
 - perform implementation refactors yourself
+- modify Sanbi-managed `.agent/protocol.md`, `.agent/roles/**`, `.agent/templates/**`, `.agent/skills/**`, `.agent/subagents/**`, or `.pi/extensions/**` during normal project work
 - bypass the Coder because a change appears small
 - silently expand an agreed task
 - accept work solely because the Coder says it passed
+- create a task automatically after discussion, grilling, domain modeling, architecture discussion, or apparent shared understanding
+- create task files merely because requirements appear complete
+- bulk-create future tasks or bypass initiative decomposition for clearly multi-task work
+- automatically invoke `/to-spec`, `/to-tickets`, `/to-task`, or `/execute`
 
 If implementation or test-source changes are required, delegate them to the Coder.
 
@@ -848,56 +957,44 @@ Do not turn it into:
 
 Update it when a completed task changes stable architectural or operational facts.
 
-## Creating Tasks
+Keep domain vocabulary separate. `CONTEXT.md` is the optional canonical domain glossary; it must not become a task log, implementation plan, command reference, or duplicate of `.agent/project.md`.
 
-Before creating a new active task, verify that no other task has `active: true`.
+## Owner-Controlled Planning
 
-Create the next sequential task ID using:
+Shared understanding is not artifact-creation permission. Natural-language agreement is distinct from `/to-spec`, `/to-tickets`, `/to-task`, and `/execute`. Recommend the next transition and STOP; never infer or invoke it.
 
-`T-001`, `T-002`, ...
+After developed discussion or grilling, classify the shape:
 
-Use `.agent/templates/task.md`.
+- **Likely standalone task:** one primary observable outcome, one fresh Coder context, one reviewable independently verifiable delta, low sequencing, and no need for durable multi-session planning. Recommend `/to-task`.
+- **Likely initiative:** several independently verifiable outcomes, multiple capabilities or meaningful subsystem/dependency sequencing, several durable product decisions, or multiple likely Lead/Coder sessions. Recommend `/to-spec`.
 
-A task contract must be explicit enough for the assigned Coder model.
+Ask whether the work could naturally split into independently useful outcomes that land green separately. If yes, it is too broad for one task. Never create a mega-task.
 
-Always define:
+Initiatives remain optional. `/to-spec` alone proposes and creates one owner-approved initiative; `/to-tickets` alone creates its owner-approved detailed Work Map. Neither creates tasks. After decomposition, report unblocked `PLANNED` frontier items without selecting one or marking it `READY`.
 
-- objective
-- why/context
-- scope
-- non-goals
-- architectural constraints
-- expected behavior
-- relevant edge cases
-- acceptance criteria
-- verification requirements
-- escalation conditions
+`/to-task` is the only normal skill-level task creation path. It supports one standalone unit or exactly one unblocked Work Map item. It applies the task-size gate, presents a compact proposal, asks `Create this task as READY?`, and writes only after explicit owner approval. If multiple initiative frontier items exist and none was named, ask the owner to select one; do not choose silently.
 
-Add implementation guidance when useful.
+After approval, allocate the next sequential `T-001`, `T-002`, ... by scanning existing tasks, verify no task is already active, and write exactly one task from `.agent/templates/task.md` with `active: true` and `status: READY`. For initiative mode, add `initiative`/`work_item`, then mark only that item `READY` and add its actual `Sanbi task: T-xxx` reference. `READY` means an actual task exists; an unblocked candidate remains `PLANNED`.
 
-For simple tasks, sections may be brief.
-
-For complex or risky tasks, provide substantially more detail.
+Keep an initiative-linked task independently executable but compressed: point to canonical initiative context rather than copying it. Retain task-specific objective, immediate context, scope/non-goals, binding constraints, expected behavior, edge cases, acceptance criteria, verification, implementation guidance, and escalation conditions.
 
 ## Readiness and Owner Authorization
 
-Task readiness and owner authorization are separate.
+Task creation and execution authorization are separate.
 
-`READY` means you believe the task contract is sufficiently complete for implementation. It does not mean the owner has authorized implementation.
+`READY` means the owner explicitly approved `/to-task`'s compact proposal and the task contract now exists. It does not authorize implementation.
 
-When a task becomes implementation-ready:
+After `/to-task` writes the task:
 
-1. complete the task contract
-2. set its status to `READY`
-3. summarize its goal, key constraints, and acceptance criteria to the owner
-4. tell the owner to use `/execute` when implementation should begin
-5. stop and wait
+1. summarize its goal, key constraints, and acceptance criteria
+2. tell the owner to use `/execute` when implementation should begin
+3. stop and wait
 
 Never delegate implementation merely because a task has become `READY`.
 
 Only the deterministic `/execute` lifecycle command may transition `READY -> CODING` and send the task-start message to Coder. Do not make that transition or invoke Coder yourself for initial task execution.
 
-Do not interpret discussion, agreement with an architectural idea, answers to clarification questions, or phrases such as “sounds good,” “okay,” or “that works” as implementation authorization. For V1, `/execute` is the only authorization mechanism.
+Do not interpret discussion, agreement with an architectural idea, answers to clarification questions, or phrases such as “sounds good,” “okay,” or “that works” as `/to-spec`, `/to-tickets`, `/to-task`, or `/execute`. Each is a distinct owner transition. `/execute` remains the only initial implementation authorization mechanism.
 
 The owner may continue discussing or changing a `READY` task. Update the existing contract while keeping it `READY`, or return it to `DRAFT` if it is no longer implementation-ready.
 
@@ -914,10 +1011,17 @@ When the Coder reports `BLOCKED`:
 3. resolve the question yourself when it is legitimately within Lead authority
 4. ask the owner when a product or owner-level decision is required
 5. persist any important decision in the task contract or project context
-6. return task status to `CODING`
-7. notify the same Coder session to continue
+6. invoke `sanbi_signal_coder({ kind: "continue", task: "T-xxx" })`; it atomically returns the task to `CODING` and signals the known Coder peer
+
+Do not edit the status separately or discover/use Herdr CLI commands for routine continuation.
+
+## Subagents
+
+Sanbi Subagent V2 gives Lead exactly `scout`, `researcher`, and `reviewer`. They are fresh, application-non-writing, in-process specialists and remain advisory. Delegate with context pointers rather than full transcript copies. They cannot authorize `/execute`, alter task or initiative state, or replace Lead responsibility.
 
 ## Review
+
+Use the Lead-only `code-review` skill for substantive task review. Lead remains the final authority. The existing non-writing `reviewer` subagent may independently assess Contract and Standards axes when useful, but never writes source, tests, or lifecycle state.
 
 Never treat the Coder's result report as proof.
 
@@ -935,7 +1039,7 @@ Run independent verification when appropriate.
 
 You may run tests and tooling, but you may not write or modify test code yourself.
 
-If additional tests are needed, instruct the Coder to write them.
+If additional tests are needed, instruct the Coder to write them. Record findings in `.agent/reviews/<task-id>.md`; return defects to Coder through the existing `REVIEW -> CODING` path rather than fixing them yourself.
 
 ## Rework
 
@@ -943,10 +1047,9 @@ When work is insufficient:
 
 1. append a new review round to `.agent/reviews/<task-id>.md`
 2. explain concrete actionable findings
-3. set the task back to `CODING`
-4. notify the same Coder session
+3. invoke `sanbi_signal_coder({ kind: "rework", task: "T-xxx" })`; it atomically performs `REVIEW -> CODING` and signals the same Coder session
 
-Do not create a fresh Coder session for ordinary rework.
+Do not edit the status separately, create a fresh Coder session, or discover/use Herdr CLI commands for ordinary rework.
 
 ## Completion
 
@@ -956,12 +1059,15 @@ Before marking `DONE`:
 
 - verify acceptance criteria
 - perform appropriate independent verification
+- if task frontmatter names an initiative/work item, update that canonical initiative item to `DONE`, retain its task reference, append only meaningful initiative-level Progress, and identify—but do not automatically promote—the newly unblocked frontier
 - update `.agent/project.md` if stable project knowledge changed
 - ensure final result artifact is accurate
 - append final approval to the review artifact
 - write `.agent/handoffs/<task-id>.md`
 
-Then mark the task `DONE`.
+For initiative-linked work, the handoff points to the canonical initiative and records only the completed work item, meaningful initiative delta, and likely next frontier. Do not copy the initiative into the handoff or create the next task automatically.
+
+Then mark the task `DONE` as the final durable completion step. This preserves recoverability: an active `DONE` task already has its required initiative reconciliation and handoff.
 
 Tell the owner the task is complete and that `/next` is available.
 
@@ -1000,7 +1106,7 @@ The Lead owns planning, architecture, task definition, and final review.
 
 ## You May
 
-- read the repository
+- read the repository and a linked initiative when useful for the active task
 - modify application source code
 - modify test source code
 - add application code
@@ -1020,6 +1126,7 @@ The Lead owns planning, architecture, task definition, and final review.
 - make unapproved architecture changes
 - silently expand task scope
 - rewrite the Lead's task contract
+- alter initiative status, Decisions, Work Map slices, future-item state, ordering, or Progress
 - alter `active` task metadata
 - modify project-wide architectural documentation unless the task explicitly requires implementation-related documentation
 - mark a task `DONE`
@@ -1037,7 +1144,7 @@ When the Lead assigns a task:
 5. verify that repository reality is compatible with the contract
 6. begin implementation only when the task is sufficiently clear
 
-The task contract is authoritative.
+The task contract is authoritative. An initiative is supporting multi-task context, not permission to redesign the active slice. Report initiative-level discoveries in the result artifact so Lead can reconcile them.
 
 ## Implementation Freedom
 
@@ -1051,7 +1158,7 @@ If `EXACT`, do not materially deviate without approval.
 
 ## Tests
 
-Tests are part of implementation ownership.
+Tests are part of implementation ownership. Use the Coder-only `tdd` skill when meaningful behavior can benefit from a red-green loop; it is a discipline inside the active task, not a separate workflow.
 
 Add or modify tests when:
 
@@ -1060,7 +1167,11 @@ Add or modify tests when:
 - needed to protect behavior changed by the implementation
 - requested by the Lead during review
 
-Do not omit appropriate tests merely because the task contract did not name an exact test file.
+Do not omit appropriate tests merely because the task contract did not name an exact test file. Resolve testing seams from the task, repository conventions, and linked initiative strategy. If a materially consequential seam remains ambiguous, ask Lead through the existing BLOCKED flow, never the owner directly.
+
+## Subagents
+
+Sanbi Subagent V2 gives Coder exactly `scout`, `researcher`, and `diagnostic-scout`. They are fresh, application-non-writing, in-process specialists. Delegate with context pointers rather than full transcript copies. They cannot modify source/tests or task/initiative state and do not replace Coder responsibility.
 
 ## Blocking
 
@@ -1081,14 +1192,16 @@ When blocked:
 4. change task status from `CODING` to `BLOCKED`
 5. finish the turn so the lifecycle extension can automatically notify Lead through Herdr
 
-Do not continue making speculative implementation changes while blocked.
+Do not continue making speculative implementation changes while blocked. Do not discover or operate the Herdr CLI; the lifecycle sends the canonical signal automatically, with `sanbi_signal_lead({ kind: "blocked", task: "T-xxx" })` available only as a narrow retry after visible failure.
+
+For non-trivial bugs, use the Coder-only `diagnosing-bugs` discipline. The existing non-implementing `diagnostic-scout` is an optional investigative assistant, not an implementer; Coder remains responsible for diagnosis and the fix.
 
 ## Completion
 
 Before requesting review:
 
 1. complete implementation
-2. inspect your own diff
+2. inspect your own Git diff only when runtime capability says `VCS: git`; for `VCS: none`, inspect result-reported and task-relevant current files without attempting Git status/diff/log
 3. run required verification
 4. update the result artifact accurately
 5. record meaningful deviations or unresolved risks
@@ -1099,7 +1212,7 @@ The lifecycle extension sends the canonical notification:
 
 `T-043 is ready for review. Read .agent/results/T-043.md.`
 
-Do not claim signalling is unavailable merely because there is no model-callable Herdr tool. Notification is lifecycle infrastructure and runs automatically after the agent settles.
+Do not discover or operate the Herdr CLI for this notification. It is Sanbi lifecycle infrastructure and runs automatically after the agent settles. If an automatic notification visibly fails while the task is already `REVIEW`, `sanbi_signal_lead({ kind: "review", task: "T-xxx" })` is the narrow retry action.
 
 ## Rework
 
@@ -1319,6 +1432,9 @@ title: Replace with task title
 status: DRAFT
 active: true
 implementation_freedom: NORMAL
+# Optional initiative linkage; remove these comments or replace them with real fields:
+# initiative: I-001
+# work_item: W1
 ---
 
 # T-000 — Replace with task title
@@ -1331,7 +1447,9 @@ Describe the concrete outcome this task must produce.
 
 Explain why the change is needed and the relevant existing behavior.
 
-Include enough context that the Coder does not need to infer the product or architectural intent.
+Include enough context that the Coder does not need to infer the immediate product or architectural intent.
+
+For an initiative-linked task, state that higher-level product decisions and initiative context remain canonical in the linked initiative/work item. Point to that artifact rather than repeating its full prose.
 
 ## Scope
 
@@ -1444,6 +1562,10 @@ Describe what was actually implemented.
 
 - ...
 
+## Focused Engineering Evidence
+
+When relevant, record concise red/green evidence, bug reproduction and supported root cause, or a missing correct test seam. Do not include a debugging transcript.
+
 ## Verification Performed
 
 | Command / Check | Result |
@@ -1495,16 +1617,21 @@ task: T-000
 
 **Verdict:** `CHANGES_REQUIRED` or `APPROVED`
 
-### Contract Check
+### Contract Axis
 
-- Objective: PASS / FAIL
-- Scope: PASS / FAIL
-- Architectural constraints: PASS / FAIL
-- Acceptance criteria: PASS / FAIL
+Check Objective, included/excluded scope, Architectural Constraints, Expected Behavior and Edge Cases, Acceptance Criteria, Verification Requirements, implementation freedom, and execution decisions.
 
-### Repository Review
+#### Findings
 
-Summarize relevant findings from the actual diff and surrounding code.
+List contract defects or verification gaps with task evidence. If none, state none.
+
+### Standards Axis
+
+Assess the actual implementation against repository-specific conventions, relevant ADR/domain language, test quality, maintainability, and applicable engineering heuristics.
+
+#### Findings
+
+Distinguish material violations from optional improvements. If none, state none.
 
 ### Independent Verification
 
@@ -1512,16 +1639,9 @@ Summarize relevant findings from the actual diff and surrounding code.
 | --- | --- |
 | `...` | PASS / FAIL |
 
-### Findings
-
-If changes are required, every finding should be concrete and actionable.
-
-1. ...
-2. ...
-
 ### Required Changes
 
-- ...
+Include only for `CHANGES_REQUIRED`. Lead returns the same task/session to `CODING`; Lead does not implement the fix.
 
 ---
 
@@ -1548,6 +1668,10 @@ task: T-000
 ## Completed
 
 Concise description of the final reviewed outcome.
+
+## Active Initiative
+
+Omit this section for standalone tasks. For initiative-linked work, point to `.agent/initiatives/I-xxx-<slug>.md` and record only the completed work item, meaningful initiative delta, and likely next frontier. Do not copy the full initiative.
 
 ## Stable Decisions Made
 
@@ -2100,7 +2224,7 @@ status: READY
 active: true
 ```
 
-Lead summarizes the task to the owner, tells the owner to use `/execute`, and stops. `READY` records Lead's readiness judgment only; it is not implementation authorization. Discussion may continue and the contract may remain `READY` or return to `DRAFT`.
+After the owner explicitly invokes `/to-task` and approves its exact compact proposal, Lead creates the task as `READY`, summarizes it, tells the owner to use `/execute`, and stops. `READY` records owner-approved contract readiness; it is not implementation authorization. Discussion may continue and the contract may remain `READY` or return to `DRAFT`.
 
 Lead should account for the fact that Coder may be less capable than Lead. The task should not depend on Coder inferring critical architectural decisions.
 
@@ -2671,25 +2795,18 @@ Reason:
 
 ---
 
-# 54. Direct Herdr CLI in V1
+# 54. Sanbi-Native Lifecycle Signaling
 
-Lead will control Coder directly using Herdr CLI primitives.
-
-No custom orchestration CLI yet.
+Herdr remains the transport for the persistent Lead and Coder processes, but models do not discover or compose routine Herdr CLI commands.
 
 Conceptually:
 
 ```text
-Lead
-  │
-  └─ herdr ... coder "Start T-043..."
+Lead  ── sanbi_signal_coder ──→ Coder
+Coder ── sanbi_signal_lead  ──→ Lead
 ```
 
-and Coder similarly wakes Lead.
-
-Exact Herdr CLI syntax should be verified against the installed version during implementation.
-
-Avoid hardcoding assumptions before checking the actual local Herdr version.
+The lifecycle extension resolves the configured sibling, validates task state, emits canonical messages, and applies guarded rollback when delivery fails. Direct owner-driven Herdr workflows remain available.
 
 ---
 
@@ -2713,7 +2830,7 @@ Reasons to consider it later:
 
 But the decision is:
 
-> **Prove the system first using direct Herdr CLI. Build `devctl` only if repeated workflow mechanics justify it.**
+> **Keep lifecycle orchestration narrow and semantic. Add a broader `devctl` only if repeated owner workflows justify it.**
 
 ---
 
@@ -3053,6 +3170,13 @@ Create if missing:
 .agent/
 .agent/roles/
 .agent/templates/
+.agent/skills/lead/
+.agent/skills/coder/
+.agent/skills/shared/
+.agent/subagents/shared/
+.agent/subagents/lead/
+.agent/subagents/coder/
+.agent/initiatives/
 .agent/tasks/
 .agent/results/
 .agent/reviews/
@@ -3071,7 +3195,14 @@ Create if missing:
 .agent/templates/result.md
 .agent/templates/review.md
 .agent/templates/handoff.md
+.agent/templates/initiative.md
+.agent/skills/**                 # canonical Sanbi-managed skill payload
+.agent/subagents/{shared,lead,coder}/** # canonical Sanbi-managed registry namespaces
 .pi/extensions/lifecycle.ts
+.pi/extensions/sanbi-subagents.ts
+.pi/sanbi/subagent-ui.js
+.pi/sanbi/runtime-temp.js
+.pi/sanbi/runtime-process.js
 ```
 
 Do not overwrite existing copies in normal V1 operation. New adoptions also receive `.agent/scaffold-version`. Legacy/outdated projects are reported but remain unchanged until the owner runs `sanbi upgrade` with no active task.
@@ -3089,8 +3220,9 @@ Using current directory as project root:
 5. ensure Lead Pi running in left pane,
 6. ensure Coder Pi running in right pane,
 7. provide role/project/peer environment/config,
-8. bootstrap missing Pi sessions,
-9. focus project workspace.
+8. add Lead+Shared or Coder+Shared roots with Pi's repeatable `--skill` argument,
+9. bootstrap missing Pi sessions,
+10. focus project workspace.
 
 The project-key derivation mechanism should avoid collisions for same-named directories in different paths.
 
@@ -3194,22 +3326,13 @@ The role/task design must work even if models are swapped.
 
 ---
 
-# 68. Matt Pocock Skills — Deferred Phase
+# 68. Sanbi-Adapted Skills
 
-After V1 local workflow works:
-
-1. inspect Matt Pocock's skills,
-2. classify them by:
-   - Lead-only,
-   - Coder-only,
-   - shared,
-   - unnecessary,
-3. add only skills that improve the established workflow,
-4. do not let skill framework redefine the architecture.
+Sanbi installs only selected, adapted skills under its role-aware managed roots. Lead-only, Coder-only, and Shared skills are listed in the filesystem section. Pi receives the applicable roots additively, preserving global resources.
 
 Important principle:
 
-> Skills enhance local agent capability. They do not own the workflow.
+> Skills enhance local agent capability. Sanbi remains the workflow owner.
 
 ---
 
@@ -3546,8 +3669,7 @@ Only after actual usage decide whether to add:
 - strict write guardrails,
 - task directories/state files,
 - richer cold recovery,
-- Hermes notifications,
-- Matt Pocock skills.
+- Hermes notifications.
 
 ---
 
@@ -3644,7 +3766,7 @@ The following should be treated as settled unless local implementation reveals a
 - States: DRAFT, READY, CODING, BLOCKED, REVIEW, DONE.
 - No REWORK state; rejected review returns to CODING.
 - Task remains active:true after DONE until `/next`.
-- `READY` means contract readiness, not owner authorization.
+- `READY` means the owner approved the exact `/to-task` contract, but has not authorized implementation.
 - `/execute` is the only initial implementation authorization boundary.
 - No fuzzy natural-language execution aliases.
 
@@ -3653,8 +3775,8 @@ The following should be treated as settled unless local implementation reveals a
 - Hybrid protocol.
 - Herdr message = signal/control.
 - Files = authoritative details.
-- Lead uses direct Herdr CLI in V1.
-- No `devctl` yet.
+- Models use Sanbi-native `sanbi_signal_coder` and `sanbi_signal_lead` tools for routine lifecycle signaling.
+- Herdr remains the hidden transport; direct owner-driven Herdr workflows remain supported.
 - Long implementation is asynchronous; Lead does not wait for hours.
 
 ### Init
@@ -3695,14 +3817,12 @@ These are for later sessions/configuration work:
 8. Exact cold-recovery implementation.
 9. Hermes installation and Telegram workflow.
 10. Hermes status/notification commands.
-11. Matt Pocock skill selection.
-12. Which skills belong to Lead vs Coder vs Codex CLI.
-13. Codex CLI integration strategy.
-14. Pi write-enforcement guardrail.
-15. `devctl`.
-16. task-directory/state.json migration.
-17. multi-Coder/worktree support.
-18. richer dashboards/status views.
+11. Codex CLI integration strategy.
+12. Pi write-enforcement guardrail.
+13. `devctl`.
+14. task-directory/state.json migration.
+15. multi-Coder/worktree support.
+16. richer dashboards/status views.
 
 ---
 
