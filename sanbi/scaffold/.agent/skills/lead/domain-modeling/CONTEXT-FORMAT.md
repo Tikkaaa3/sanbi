@@ -9,12 +9,16 @@ Use a root `CONTEXT.md` only as the project's canonical domain glossary.
 
 ## Language
 
-**Order**  
-<One or two sentences defining what the term is.>  
+**Order**
+
+<One or two sentences defining what the term is.>
+
 _Avoid:_ Purchase, transaction
 
-**Customer**  
-<One or two sentences defining what the term is.>  
+**Customer**
+
+<One or two sentences defining what the term is.>
+
 _Avoid:_ Client, buyer, account
 ```
 
