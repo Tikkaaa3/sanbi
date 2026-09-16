@@ -340,7 +340,15 @@ TDD is required only where a meaningful behavioral test seam exists. Configurati
 | --- | --- |
 | `codebase-design` | Encourages deep modules, narrow interfaces, good seams, adapters, and testable boundaries. |
 
-Supporting references for domain formats, writing mechanics, design deepening, test design, and mocking live beside their owning skills. Adapted skill material derived from Matt Pocock's MIT-licensed public skills repository carries attribution in `sanbi/scaffold/.agent/skills/LICENSE.mattpocock`.
+Supporting references for domain formats, writing mechanics, design deepening, test design, and mocking live beside their owning skills.
+
+## Acknowledgements
+
+Sanbi's skill system was strongly inspired by and adapted from [Matt Pocock's `mattpocock/skills` project](https://github.com/mattpocock/skills). In particular, Sanbi adapts `grilling`, `grill-with-docs`, `grill-me`, `wait-what`, `to-questionnaire`, `domain-modeling`, `writing-for-agents`, `to-spec`, `to-tickets`, `code-review`, `retro`, `codebase-design`, `tdd`, and `diagnosing-bugs` from Matt's work.
+
+Those skills were modified to fit Sanbi's persistent Lead/Coder roles, owner-controlled transitions, filesystem-backed task and initiative lifecycle, BLOCKED/REVIEW flow, specialist boundaries, and local Work Maps. For example, `to-tickets` creates an initiative-local Work Map instead of publishing tracker tickets, while TDD and diagnosis route decisions through Sanbi's task and Lead authority. Sanbi's `to-task` transition is project-specific and connects the adapted planning skills to the explicit `READY → /execute` authorization boundary.
+
+The adapted material is based on [`mattpocock/skills` commit `3cca18b`](https://github.com/mattpocock/skills/commit/3cca18b368ae95cdbdebbff572ccafa662551015) and is used under the MIT License. The full copyright notice and license are preserved in [`sanbi/scaffold/.agent/skills/LICENSE.mattpocock`](sanbi/scaffold/.agent/skills/LICENSE.mattpocock). Thank you to Matt Pocock for publishing the original skills and ideas openly.
 
 ## Specialist subagents
 
