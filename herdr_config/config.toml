@@ -1,0 +1,110 @@
+# Herdr global configuration for the Sanbi workflow.
+# Windows location: %APPDATA%\herdr\config.toml
+#
+# Apply changes to a running Herdr server with:
+#   herdr server reload-config
+#
+# This config intentionally does NOT set a default shell.
+# Sanbi launches Lead/Coder explicitly, and normal panes can keep using
+# Herdr / Windows' existing shell selection.
+
+onboarding = false
+
+[theme]
+name = "catppuccin"
+
+[terminal]
+# New panes/tabs/workspaces created without an explicit --cwd inherit
+# the current source pane/workspace directory.
+new_cwd = "follow"
+
+[session]
+# After a full Herdr server restart, supported agents such as Pi may
+# resume their native conversation session when the Herdr integration
+# has a valid session reference.
+resume_agents_on_restore = true
+
+[ui]
+# Main Sanbi dashboard.
+sidebar_width = 30
+sidebar_min_width = 22
+sidebar_max_width = 40
+sidebar_start_collapsed = false
+
+# Ctrl+B, then B toggles the sidebar. When collapsed, reclaim all width.
+sidebar_collapsed_mode = "hidden"
+
+# Attention-first ordering:
+# blocked -> done/unseen -> working -> idle -> unknown.
+agent_panel_sort = "priority"
+
+# Use distinct symbols as well as colors for agent states.
+status_indicators = "symbols"
+
+# Compact two-pane presentation.
+pane_borders = true
+pane_outer_borders = false
+pane_gaps = false
+pane_scrollbars = false
+
+# If a pane does not already have a manual name, show its detected agent label.
+show_agent_labels_on_pane_borders = true
+
+# Sanbi normally has one tab containing Lead + Coder, so reclaim the tab-bar row.
+# Creating a second tab makes the tab bar appear automatically.
+hide_tab_bar_when_single_tab = true
+
+# Host terminal / Windows Terminal title.
+window_title = "{workspace} — {pane}"
+
+[ui.sidebar.agents]
+row_gap = 0
+rows = [
+  ["state_icon", { token = "pane", bold = true }, "state_text"],
+  [{ token = "workspace", dim = true }, { token = "agent", dim = true }],
+]
+
+[ui.sidebar.spaces]
+row_gap = 0
+rows = [
+  ["state_icon", { token = "workspace", bold = true }, "state_text"],
+  ["branch", "git_status"],
+]
+
+[ui.toast]
+# Native OS notifications for background agents that finish or need attention.
+# Current stable Herdr supports Windows system notifications.
+delivery = "system"
+delay_seconds = 1
+
+[ui.sound]
+# Keep Herdr's built-in notification sounds, with no custom audio files.
+# These are used for completion / attention events rather than continuous noise.
+enabled = true
+
+[ui.sound.agents]
+pi = "on"
+
+[keys]
+# Keep the normal Herdr prefix model.
+prefix = "ctrl+b"
+
+# Useful explicit bindings when the tab bar/sidebar is hidden.
+toggle_sidebar = "prefix+b"
+new_tab = "prefix+c"
+reload_config = "prefix+shift+r"
+open_notification_target = "prefix+o"
+
+# Preserve familiar prefix navigation AND add fast direct navigation.
+# Ctrl+Alt+H/J/K/L moves between Herdr panes without entering prefix mode.
+focus_pane_left  = ["prefix+h", "ctrl+alt+h"]
+focus_pane_down  = ["prefix+j", "ctrl+alt+j"]
+focus_pane_up    = ["prefix+k", "ctrl+alt+k"]
+focus_pane_right = ["prefix+l", "ctrl+alt+l"]
+
+[experimental]
+# Deliberately keep pane screen-history persistence off.
+# This does NOT affect normal detach/reattach persistence.
+# It only means recent terminal pixels/text are not saved to disk for replay
+# after a full Herdr server restart.
+pane_history = false

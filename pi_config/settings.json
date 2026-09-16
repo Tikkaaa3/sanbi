@@ -1,0 +1,33 @@
+{
+  "lastChangelogVersion": "0.85.1",
+  "theme": "catppuccin-mocha",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "tuiMode": "fullscreen",
+  "packages": [
+    {
+      "source": "npm:pi-ask-user",
+      "skills": []
+    },
+    "npm:pi-web-access",
+    "npm:pi-footer",
+    "npm:@mjakl/pi-subagent",
+    "npm:@sherif-fanous/pi-catppuccin"
+  ],
+  "quietStartup": true,
+  "collapseChangelog": true,
+  "fullscreenScrollbar": "auto",
+  "fullscreenCopyOnSelect": true,
+  "defaultTools": [
+    "read",
+    "bash",
+    "edit",
+    "write",
+    "grep",
+    "find",
+    "ls"
+  ],
+  "extensions": [
+    "extensions/subagent-toggle.ts"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "workflow": "none",
+  "searchRouting": {
+    "providers": [
+      "openai",
+      "exa"
+    ],
+    "useCurrentModel": true,
+    "fallbackOn": [
+      "unsupported",
+      "transient",
+      "quota",
+      "network",
+      "invalid-response"
+    ]
+  }
+}
