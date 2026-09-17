@@ -18,10 +18,10 @@ function runInstaller(piRoot, herdrRoot, ...args) {
   });
 }
 
-async function fakeHermes(root) {
+async function fakeHermes(root, gatewayStatus = "No gateway service installed") {
   const command = path.join(root, "hermes-fake.mjs");
   const log = path.join(root, "hermes-calls.log");
-  const body = `import { appendFileSync } from "node:fs";\nconst args = process.argv.slice(2);\nappendFileSync(${JSON.stringify(log)}, args.join(" ") + "\\n");\nif (args.slice(0, 2).join(" ") === "gateway status") console.log("No gateway service installed");\n`;
+  const body = `import { appendFileSync } from "node:fs";\nconst args = process.argv.slice(2);\nappendFileSync(${JSON.stringify(log)}, args.join(" ") + "\\n");\nif (args.slice(0, 2).join(" ") === "gateway status") console.log(${JSON.stringify(gatewayStatus)});\n`;
   await writeFile(command, body);
   return { command, log };
 }
@@ -113,7 +113,9 @@ test("installer provisions portable Hermes plugin without overwriting local secr
     assert.match(envFile, /TELEGRAM_BOT_TOKEN=old-token/);
     assert.doesNotMatch(envFile, /test-token-must-not-appear/);
     assert.match(await readFile(path.join(hermesRoot, "plugins", "sanbi-readonly", "plugin.yaml"), "utf8"), /name: sanbi-readonly/);
-    assert.deepEqual(JSON.parse(await readFile(path.join(hermesRoot, "sanbi", "projects.json"), "utf8")), { projects: {} });
+    assert.deepEqual(JSON.parse(await readFile(path.join(hermesRoot, "sanbi", "projects.json"), "utf8")), {
+      workspace_roots: [path.dirname(repositoryRoot)], projects: {},
+    });
     const calls = await readFile(fake.log, "utf8");
     for (const call of expectedHermesConfigCalls) assert.match(calls, new RegExp(`^${call}$`, "m"));
     assert.ok(calls.indexOf(expectedHermesConfigCalls.at(-1)) < calls.indexOf("plugins doctor"), "managed config must be applied before plugin operations");
@@ -122,6 +124,62 @@ test("installer provisions portable Hermes plugin without overwriting local secr
     assert.doesNotMatch(calls, /gateway (install|restart|start)/);
     assert.equal(await readFile(path.join(hermesRoot, "auth.json"), "utf8"), '{"oauth":"preserve-me"}\n');
     assert.equal(await readFile(path.join(hermesRoot, "config.yaml"), "utf8"), "unrelated:\n  local: preserve-me\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes registry merges trusted workspace roots and preserves explicit projects", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sanbi-hermes-registry-"));
+  const hermesRoot = path.join(root, "hermes");
+  const workspaceA = path.join(root, "Workspace A");
+  const workspaceB = path.join(root, "Workspace B");
+  const explicit = path.join(root, "external");
+  try {
+    await mkdir(path.join(hermesRoot, "sanbi"), { recursive: true });
+    await mkdir(path.join(explicit, ".agent"), { recursive: true });
+    await mkdir(workspaceA, { recursive: true });
+    await mkdir(workspaceB, { recursive: true });
+    await writeFile(path.join(hermesRoot, "sanbi", "projects.json"), JSON.stringify({
+      workspace_roots: [workspaceA], projects: { keep: { path: explicit } },
+    }));
+    const fake = await fakeHermes(root);
+    const result = spawnSync(process.execPath, [installer, "--skip-link", "--skip-config"], {
+      cwd: repositoryRoot, encoding: "utf8",
+      env: {
+        ...process.env, HERMES_HOME: hermesRoot, HERMES_COMMAND: process.execPath,
+        HERMES_COMMAND_PREFIX: fake.command,
+        HERMES_SANBI_WORKSPACE_ROOTS: JSON.stringify([workspaceA, workspaceB, `${workspaceB}${path.sep}`]),
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(await readFile(path.join(hermesRoot, "sanbi", "projects.json"), "utf8")), {
+      workspace_roots: [path.resolve(workspaceA), path.resolve(workspaceB)],
+      projects: { keep: { path: explicit } },
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("installer refuses a registry schema change while an unmanaged gateway is running", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sanbi-hermes-running-"));
+  const hermesRoot = path.join(root, "hermes");
+  try {
+    await mkdir(path.join(hermesRoot, "sanbi"), { recursive: true });
+    const original = `${JSON.stringify({ projects: { keep: { path: path.join(root, "project") } } }, null, 2)}\n`;
+    await writeFile(path.join(hermesRoot, "sanbi", "projects.json"), original);
+    const fake = await fakeHermes(root, "✓ Gateway process running (PID: 1234)");
+    const result = spawnSync(process.execPath, [installer, "--skip-link", "--skip-config"], {
+      cwd: repositoryRoot, encoding: "utf8",
+      env: {
+        ...process.env, HERMES_HOME: hermesRoot, HERMES_COMMAND: process.execPath,
+        HERMES_COMMAND_PREFIX: fake.command,
+      },
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /gateway is running.*must be reloaded/i);
+    assert.equal(await readFile(path.join(hermesRoot, "sanbi", "projects.json"), "utf8"), original);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

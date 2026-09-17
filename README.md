@@ -564,3 +564,73 @@ hermes auth add openai-codex
 ```
 
 `--dry-run` reads the manifest and prints every intended `hermes config set` operation, but it does not invoke Hermes or write any Hermes files.
+
+## Hermes dynamic workspace discovery
+
+The vendored `sanbi-readonly` plugin is version 4.0.0 and includes the complete Hermes integration used by this workstation: deterministic Sanbi status, sentinel-bound Lead conversation, lazy runtime activation, `/execute`, `/next`, `/to-task`, `/to-task-approve`, Telegram routing, and dynamic project discovery from trusted workspace roots.
+
+A normal `make install`, `make update`, or `./install.sh` installs this plugin, applies the credential-free settings in `hermes/managed-config.json`, enables the plugin without tool-override permission, and merges the trusted workspace configuration into Hermes' existing `sanbi/projects.json`. Existing explicit aliases and unrelated Hermes state are preserved.
+
+By default, the parent directory containing this setup repository becomes a trusted workspace root. With the common layout:
+
+```text
+Workspace/
+├── setup/
+├── 2dweb/
+├── voxveil/
+└── newgame/
+```
+
+Hermes discovers `setup`, `2dweb`, `voxveil`, and `newgame` automatically as project aliases. Discovery is fresh and read-only on every relevant request, examines direct child directories only, and does not use a cache, watcher, cron job, or background scanner. A directory does not need `.agent`, `.pi`, Git, or a package manifest to be listed. Sanbi initialization occurs only when the owner explicitly performs an operation such as `/lead`; listing and status commands never initialize or activate a project.
+
+Override or extend the trusted roots at installation time with a JSON array of absolute paths:
+
+```bash
+export HERMES_SANBI_WORKSPACE_ROOTS='["C:/Users/me/Workspace","D:/Projects"]'
+./install.sh
+```
+
+Existing roots are preserved and duplicates are removed using Windows-compatible case-insensitive path normalization. Explicit aliases remain optional and take precedence over dynamically discovered basenames:
+
+```bash
+export HERMES_SANBI_PROJECT_ALIAS='special-game'
+export HERMES_SANBI_PROJECT_PATH='D:/Repos/actual-game'
+./install.sh
+```
+
+Dynamic aliases are directory basenames and resolve case-insensitively on Windows while preserving filesystem casing for display. Multiple roots exposing the same basename fail closed as ambiguous. Raw paths, traversal components, absolute paths, UNC paths, and aliases containing path separators are rejected. Resolved dynamic project and `.agent` paths must remain contained within the trusted workspace root; escaping symlinks or junctions are not exposed.
+
+Directories with spaces are addressable with quotes:
+
+```text
+/projects
+/project "My Project"
+/lead "My Project" inspect this directory
+```
+
+The concise project list reports only initialization classification, based on `.agent/config.json`; it does not perform an expensive runtime join for every directory. An uninitialized status is deterministic:
+
+```text
+Project: newgame
+Path: C:\Users\me\Workspace\newgame
+Sanbi: not initialized
+Runtime: offline
+```
+
+Use these Hermes-only shortcuts when Pi, Herdr, and the global `sanbi` executable are already installed:
+
+```bash
+make dry-run-hermes
+make install-hermes
+```
+
+Telegram credentials remain install-time secrets and are never stored in the repository. Gateway lifecycle management also remains explicit:
+
+```bash
+export HERMES_TELEGRAM_BOT_TOKEN='set-at-install-time'
+export HERMES_TELEGRAM_ALLOWED_USERS='123456789'
+export HERMES_GATEWAY_MANAGE=1
+make install
+```
+
+The installer hides credential values, preserves existing credentials, validates the plugin with Plugin Doctor, and starts or restarts the gateway only when `HERMES_GATEWAY_MANAGE=1` is supplied. If a registry schema update is required while a gateway is already running, installation fails before changing the registry unless gateway management is explicitly enabled; this prevents an older in-memory plugin from being broken by the new schema. Provider OAuth remains a separate manual step.

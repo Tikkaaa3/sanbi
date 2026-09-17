@@ -6,6 +6,7 @@ process only and does not coordinate multiple gateway processes.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import os
@@ -45,6 +46,10 @@ class BridgeError(RuntimeError):
 class HerdrTimeout(BridgeError):
     """A bounded Herdr CLI call timed out; callers may poll again."""
     pass
+
+
+def _lock_alias(alias: str) -> str:
+    return alias.casefold() if isinstance(alias, str) else alias
 
 
 def new_token() -> str:
@@ -195,10 +200,12 @@ class HerdrTransport:
 
 
 def _resolve(alias: str, registry_path: Path | None) -> tuple[Path, str, str, str]:
-    registered = {entry["alias"]: entry for entry in core.load_registry(registry_path)}
-    if alias not in registered:
-        raise BridgeError(f"Unknown project alias {alias!r}; raw paths are not accepted")
-    project = Path(registered[alias]["path"])
+    try:
+        resolved = core.resolve_project(alias, registry_path)
+        project = core.validate_project_paths(resolved)
+    except core.SanbiError as exc:
+        message = str(exc).removeprefix("Sanbi status unavailable: ")
+        raise BridgeError(message) from exc
     try:
         config = json.loads((project / ".agent" / "config.json").read_text(encoding="utf-8"))
         lead = config["herdr"]["leadAgent"]
@@ -516,9 +523,9 @@ def next_project(alias: str, *, registry_path: Path | None = None,
                  activation_token_factory: Callable[[], str] = new_token) -> str:
     """Submit fixed Pi /next once, then report the bounded final snapshot."""
     with _IN_FLIGHT_LOCK:
-        if alias in _IN_FLIGHT:
+        if _lock_alias(alias) in _IN_FLIGHT:
             raise BridgeError(f"A Lead request is already in flight for {alias!r}")
-        _IN_FLIGHT.add(alias)
+        _IN_FLIGHT.add(_lock_alias(alias))
     try:
         project, key, lead, coder = _resolve(alias, registry_path)
         task_reader = task_reader or (lambda root: core._read_tasks(root / ".agent"))
@@ -566,20 +573,27 @@ def next_project(alias: str, *, registry_path: Path | None = None,
         return _next_result(alias, baseline_id, final_tasks, baseline_runtime, final_runtime)
     finally:
         with _IN_FLIGHT_LOCK:
-            _IN_FLIGHT.discard(alias)
+            _IN_FLIGHT.discard(_lock_alias(alias))
 
 
 def _plain_bootstrap(transport: Any, project: Path) -> str:
     workspaces, agents = _joined_workspaces(transport)
-    matches = [w for w in workspaces
-               if isinstance(w, dict) and w.get("label") == BOOTSTRAP_LABEL]
+    digest = hashlib.sha256(os.path.normcase(os.path.abspath(str(project))).encode("utf-8")).hexdigest()[:12]
+    project_label = f"{BOOTSTRAP_LABEL}-{digest}"
+    candidates = [w for w in workspaces if isinstance(w, dict) and w.get("label") in {BOOTSTRAP_LABEL, project_label}]
+    expected_root = os.path.normcase(os.path.abspath(str(project)))
+    matches = [w for w in candidates if len(w.get("panes", [])) == 1 and
+               isinstance(w["panes"][0].get("cwd"), str) and
+               os.path.normcase(os.path.abspath(w["panes"][0]["cwd"])) == expected_root]
     if len(matches) > 1:
         raise BridgeError("Duplicate Hermes bootstrap workspaces")
+    if not matches and any(w.get("label") == project_label for w in candidates):
+        raise BridgeError("Hermes project bootstrap workspace has an unsafe cwd")
     if not matches:
-        transport.create_workspace(str(project), BOOTSTRAP_LABEL)
+        label = BOOTSTRAP_LABEL if not candidates else project_label
+        transport.create_workspace(str(project), label)
         workspaces, agents = _joined_workspaces(transport)
-        matches = [w for w in workspaces
-                   if isinstance(w, dict) and w.get("label") == BOOTSTRAP_LABEL]
+        matches = [w for w in workspaces if isinstance(w, dict) and w.get("label") == label]
     if len(matches) != 1:
         raise BridgeError("Hermes bootstrap workspace is unavailable")
     ws = matches[0]; panes = ws["panes"]
@@ -639,9 +653,9 @@ def execute_project(alias: str, *, registry_path: Path | None = None,
                     activation_token_factory: Callable[[], str] = new_token) -> str:
     """Submit the fixed Pi /execute command once and observe durable state."""
     with _IN_FLIGHT_LOCK:
-        if alias in _IN_FLIGHT:
+        if _lock_alias(alias) in _IN_FLIGHT:
             raise BridgeError(f"A Lead request is already in flight for {alias!r}")
-        _IN_FLIGHT.add(alias)
+        _IN_FLIGHT.add(_lock_alias(alias))
     try:
         project, key, lead, coder = _resolve(alias, registry_path)
         status_reader = status_reader or core.read_project_status
@@ -689,7 +703,7 @@ def execute_project(alias: str, *, registry_path: Path | None = None,
         return f"{prefix}\n{baseline_id} is currently {status}."
     finally:
         with _IN_FLIGHT_LOCK:
-            _IN_FLIGHT.discard(alias)
+            _IN_FLIGHT.discard(_lock_alias(alias))
 
 
 def ask_lead(alias: str, message: str, *, registry_path: Path | None = None,
@@ -708,16 +722,34 @@ def ask_lead(alias: str, message: str, *, registry_path: Path | None = None,
         raise BridgeError("Lead timeout and intervals must be finite positive numbers")
     _reject_command(message)
     with _IN_FLIGHT_LOCK:
-        if alias in _IN_FLIGHT:
+        if _lock_alias(alias) in _IN_FLIGHT:
             raise BridgeError(f"A Lead request is already in flight for {alias!r}")
-        _IN_FLIGHT.add(alias)
+        _IN_FLIGHT.add(_lock_alias(alias))
     try:
-        project, key, lead, coder = _resolve(alias, registry_path)
         transport = transport or HerdrTransport()
         activation_deadline = monotonic() + 45.0
-        expected, online = _runtime(transport, project, key, lead, coder, alias)
-        if not online:
+        activated = False
+        try:
+            project, key, lead, coder = _resolve(alias, registry_path)
+        except BridgeError as exc:
+            if str(exc) != "Configured Lead identity is unavailable":
+                raise
+            try:
+                discovered = core.resolve_project(alias, registry_path)
+            except core.SanbiError as resolve_exc:
+                raise BridgeError(str(resolve_exc).removeprefix("Sanbi status unavailable: ")) from resolve_exc
+            if discovered.get("initialized") is not False:
+                raise
+            project = Path(discovered["path"])
             _activate(transport, project, activation_token_factory(), activation_deadline, monotonic, sleep, min(interval, .5))
+            activated = True
+            project, key, lead, coder = _resolve(alias, registry_path)
+            expected, online = _runtime(transport, project, key, lead, coder, alias)
+        else:
+            expected, online = _runtime(transport, project, key, lead, coder, alias)
+        if not online:
+            if not activated:
+                _activate(transport, project, activation_token_factory(), activation_deadline, monotonic, sleep, min(interval, .5))
             while True:
                 expected, online = _runtime(transport, project, key, lead, coder, alias)
                 if online: break
@@ -793,7 +825,7 @@ def ask_lead(alias: str, message: str, *, registry_path: Path | None = None,
         raise BridgeError(_delivered_timeout(alias))
     finally:
         with _IN_FLIGHT_LOCK:
-            _IN_FLIGHT.discard(alias)
+            _IN_FLIGHT.discard(_lock_alias(alias))
 
 
 

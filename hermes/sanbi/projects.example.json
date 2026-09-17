@@ -1,7 +1,10 @@
 {
+  "workspace_roots": [
+    "C:/absolute/path/to/workspace"
+  ],
   "projects": {
-    "example": {
-      "path": "C:/absolute/path/to/sanbi-project"
+    "optional-special-alias": {
+      "path": "D:/absolute/path/to/project"
     }
   }
 }

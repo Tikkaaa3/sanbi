@@ -82,6 +82,28 @@ def _next_project(project: str) -> str:
     return next_project(project)
 
 
+def _parse_alias_and_remainder(raw: object) -> tuple[str, str] | None:
+    text = str(raw).lstrip()
+    if not text:
+        return None
+    if text[0] in {'"', "'"}:
+        quote = text[0]
+        end = text.find(quote, 1)
+        if end < 0 or not text[1:end]:
+            return None
+        if end + 1 < len(text) and not text[end + 1].isspace():
+            return None
+        remainder = text[end + 2:] if end + 1 < len(text) else ""
+        return text[1:end], remainder
+    match = re.match(r"^(\S+)(?:\s([\s\S]*))?$", text)
+    return (match.group(1), match.group(2) or "") if match else None
+
+
+def _single_alias(raw: object) -> str | None:
+    parsed = _parse_alias_and_remainder(raw)
+    return parsed[0] if parsed is not None and not parsed[1].strip() else None
+
+
 async def projects_command(ctx) -> str:
     core = _core()
     return core.format_projects(json.loads(core.projects_status_json()))
@@ -89,15 +111,18 @@ async def projects_command(ctx) -> str:
 
 async def project_command(ctx) -> str:
     raw = ctx if isinstance(ctx, str) else getattr(ctx, "args", "")
-    return _core().format_status(json.loads(sanbi_project_status(str(raw).strip())))
+    project = _single_alias(raw)
+    if project is None:
+        return "Usage: /project <alias>"
+    return _core().format_status(json.loads(sanbi_project_status(project)))
 
 
 async def lead_command(ctx) -> str:
     raw = ctx if isinstance(ctx, str) else getattr(ctx, "args", "")
-    parts = str(raw).strip().split(maxsplit=1)
-    if len(parts) != 2:
+    parsed = _parse_alias_and_remainder(raw)
+    if parsed is None or not parsed[1].strip():
         return "Usage: /lead <alias> <message>"
-    project, message = parts
+    project, message = parsed
     answer = sanbi_ask_lead(project, message)
     if answer.startswith("Lead request failed"):
         return answer
@@ -107,19 +132,19 @@ async def lead_command(ctx) -> str:
 
 async def execute_command(ctx) -> str:
     raw = ctx if isinstance(ctx, str) else getattr(ctx, "args", "")
-    parts = str(raw).strip().split()
-    if len(parts) != 1:
+    project = _single_alias(raw)
+    if project is None:
         return "Usage: /execute <project>"
     try:
-        return _execute_project(parts[0])
+        return _execute_project(project)
     except Exception as exc:
         try:
             from .bridge import BridgeError
         except ImportError:
             from bridge import BridgeError
         if isinstance(exc, BridgeError):
-            if str(exc).startswith(f"Unknown project alias {parts[0]!r}"):
-                return f"Unknown Sanbi project: {parts[0]}"
+            if str(exc).startswith(f"Unknown project alias {project!r}"):
+                return f"Unknown Sanbi project: {project}"
             return f"Execute request failed: {exc}"
         _LOGGER.error("Unexpected execute failure type=%s (content omitted)", type(exc).__name__)
         return "Execute request failed unexpectedly. Inspect local logs."
@@ -127,19 +152,19 @@ async def execute_command(ctx) -> str:
 
 async def next_command(ctx) -> str:
     raw = ctx if isinstance(ctx, str) else getattr(ctx, "args", "")
-    parts = str(raw).strip().split()
-    if len(parts) != 1:
+    project = _single_alias(raw)
+    if project is None:
         return "Usage: /next <project>"
     try:
-        return _next_project(parts[0])
+        return _next_project(project)
     except Exception as exc:
         try:
             from .bridge import BridgeError
         except ImportError:
             from bridge import BridgeError
         if isinstance(exc, BridgeError):
-            if str(exc).startswith(f"Unknown project alias {parts[0]!r}"):
-                return f"Unknown Sanbi project: {parts[0]}"
+            if str(exc).startswith(f"Unknown project alias {project!r}"):
+                return f"Unknown Sanbi project: {project}"
             return f"Next request failed: {exc}"
         _LOGGER.error("Unexpected next failure type=%s (content omitted)", type(exc).__name__)
         return "Next request failed unexpectedly. Inspect local logs."
@@ -192,20 +217,19 @@ def _owner_safe_lead_request(project: str, message: str, label: str) -> str:
 
 async def to_task_command(ctx) -> str:
     raw = ctx if isinstance(ctx, str) else getattr(ctx, "args", "")
-    match = re.match(r"^\s*(\S+)(?:\s([\s\S]*))?$", str(raw))
-    if not match:
+    parsed = _parse_alias_and_remainder(raw)
+    if parsed is None:
         return "Usage: /to-task <project> [request]"
-    project = match.group(1)
-    owner_request = match.group(2) or ""
+    project, owner_request = parsed
     return _owner_safe_lead_request(project, build_to_task_preparation(owner_request), "To-task")
 
 
 async def to_task_approve_command(ctx) -> str:
     raw = ctx if isinstance(ctx, str) else getattr(ctx, "args", "")
-    parts = str(raw).strip().split()
-    if len(parts) != 1:
+    project = _single_alias(raw)
+    if project is None:
         return "Usage: /to-task-approve <project>"
-    return _owner_safe_lead_request(parts[0], build_to_task_approval(), "To-task approval")
+    return _owner_safe_lead_request(project, build_to_task_approval(), "To-task approval")
 
 
 

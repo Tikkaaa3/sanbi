@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -17,6 +18,7 @@ _META_RE = re.compile(r"^\*\*(Status|Blocked by|Sanbi task|Outcome|Verification)
 _TASK_STATUSES = {"DRAFT", "READY", "CODING", "BLOCKED", "REVIEW", "DONE"}
 _INITIATIVE_STATUSES = {"DRAFT", "ACTIVE", "PAUSED", "DONE"}
 _WORK_STATUSES = {"PLANNED", "READY", "DONE", "DROPPED"}
+_LOGGER = logging.getLogger(__name__)
 
 
 def _hermes_home() -> Path:
@@ -61,7 +63,7 @@ def _error(message: str) -> SanbiError:
     return SanbiError(f"Sanbi status unavailable: {message}")
 
 
-def load_registry(path: Path | None = None) -> list[dict[str, str]]:
+def _load_registry_config(path: Path | None = None) -> dict[str, Any]:
     path = Path(path) if path is not None else default_registry_path()
     if not path.is_file():
         raise _error(f"registry does not exist: {path}")
@@ -71,17 +73,30 @@ def load_registry(path: Path | None = None) -> list[dict[str, str]]:
         raise _error("registry is not valid JSON") from exc
     if not isinstance(raw, dict):
         raise _error("registry root must be an object")
-    unknown_root = set(raw) - {"projects"}
+    unknown_root = set(raw) - {"projects", "workspace_roots"}
     if unknown_root:
         raise _error(f"unknown registry field(s): {', '.join(sorted(unknown_root))}")
     projects = raw.get("projects")
     if not isinstance(projects, dict):
         raise _error("registry projects must be an object")
-    result: list[dict[str, str]] = []
+    roots = raw.get("workspace_roots", [])
+    if not isinstance(roots, list):
+        raise _error("registry workspace_roots must be a list of absolute paths")
+    validated_roots: list[str] = []
+    for value in roots:
+        if not isinstance(value, str) or not value.strip() or not Path(value).is_absolute():
+            raise _error("registry workspace_roots entries must be nonempty absolute path strings")
+        validated_roots.append(value)
+    result: list[dict[str, Any]] = []
     canonical: dict[str, str] = {}
+    alias_keys: dict[str, str] = {}
     for alias in sorted(projects, key=lambda value: str(value)):
         if not isinstance(alias, str) or not _ALIAS_RE.fullmatch(alias):
             raise _error(f"unsafe project alias: {alias!r}")
+        alias_key = alias.casefold()
+        if alias_key in alias_keys:
+            raise _error(f"case-insensitive duplicate project aliases: {alias_keys[alias_key]!r} and {alias!r}")
+        alias_keys[alias_key] = alias
         entry = projects[alias]
         if isinstance(entry, dict):
             unknown_entry = set(entry) - {"path"}
@@ -100,8 +115,143 @@ def load_registry(path: Path | None = None) -> list[dict[str, str]]:
         if resolved in canonical:
             raise _error(f"canonical duplicate project paths for {canonical[resolved]!r} and {alias!r}")
         canonical[resolved] = alias
-        result.append({"alias": alias, "path": str(project_path.resolve())})
-    return result
+        resolved_path = project_path.resolve()
+        result.append({"alias": alias, "display_name": alias, "path": str(resolved_path),
+                       "source": "explicit", "workspace_root": None,
+                       "initialized": (resolved_path / ".agent" / "config.json").is_file()})
+    return {"projects": result, "workspace_roots": validated_roots}
+
+
+def _alias_key(alias: str) -> str:
+    return alias.casefold()
+
+
+def _validate_alias_input(alias: str) -> None:
+    if (not isinstance(alias, str) or not alias or alias != alias.strip() or alias in {".", ".."} or
+            "/" in alias or "\\" in alias or Path(alias).is_absolute() or
+            re.match(r"^[A-Za-z]:", alias) is not None):
+        raise _error(f"unsafe project alias: {alias!r}")
+
+
+def discover_projects(path: Path | None = None) -> dict[str, Any]:
+    """Freshly enumerate explicit projects and direct trusted-root children."""
+    config = _load_registry_config(path)
+    explicit = config["projects"]
+    explicit_keys = {_alias_key(item["alias"]): item for item in explicit}
+    dynamic: dict[str, list[dict[str, Any]]] = {}
+    warnings: list[str] = []
+    seen_roots: set[str] = set()
+    valid_root_count = 0
+    for configured in config["workspace_roots"]:
+        candidate = Path(configured)
+        try:
+            root = candidate.resolve(strict=True)
+            if not root.is_dir():
+                raise OSError("not a directory")
+        except (OSError, RuntimeError):
+            warnings.append(f"Workspace root unavailable: {configured}")
+            continue
+        root_key = os.path.normcase(str(root)).casefold()
+        if root_key in seen_roots:
+            continue
+        seen_roots.add(root_key); valid_root_count += 1
+        try:
+            children = list(root.iterdir())
+        except OSError:
+            warnings.append(f"Workspace root inaccessible: {configured}")
+            continue
+        for child in children:
+            try:
+                if not child.is_dir():
+                    continue
+                resolved = child.resolve(strict=True)
+                resolved.relative_to(root)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            alias = child.name
+            try:
+                _validate_alias_input(alias)
+            except SanbiError:
+                continue
+            key = _alias_key(alias)
+            if key in explicit_keys:
+                continue
+            dynamic.setdefault(key, []).append({
+                "alias": alias, "display_name": alias, "path": str(resolved),
+                "source": "workspace", "workspace_root": str(root),
+                "initialized": (resolved / ".agent" / "config.json").is_file(),
+            })
+    ambiguous = []
+    discovered = list(explicit)
+    for values in dynamic.values():
+        unique = {os.path.normcase(item["path"]).casefold(): item for item in values}
+        if len(unique) == 1:
+            discovered.append(next(iter(unique.values())))
+        else:
+            choices = sorted(unique.values(), key=lambda item: item["path"].casefold())
+            ambiguous.append({"alias": choices[0]["alias"], "paths": [item["path"] for item in choices]})
+    discovered.sort(key=lambda item: item["alias"].casefold())
+    ambiguous.sort(key=lambda item: item["alias"].casefold())
+    _LOGGER.info("Sanbi discovery roots=%d projects=%d ambiguous=%d warnings=%d",
+                 len(config["workspace_roots"]), len(discovered), len(ambiguous), len(warnings))
+    return {"projects": discovered, "ambiguous": ambiguous, "warnings": warnings,
+            "configured_roots": len(config["workspace_roots"]), "valid_roots": valid_root_count}
+
+
+def resolve_project(alias: str, path: Path | None = None) -> dict[str, Any]:
+    try:
+        _validate_alias_input(alias)
+    except SanbiError as exc:
+        raise _error(f"Unknown project alias {alias!r}; unsafe project alias; raw paths are not accepted") from exc
+    found = discover_projects(path)
+    key = _alias_key(alias)
+    for entry in found["projects"]:
+        if _alias_key(entry["alias"]) == key:
+            _LOGGER.info("Sanbi resolver alias=%s source=%s", entry["alias"], entry["source"])
+            return entry
+    for collision in found["ambiguous"]:
+        if _alias_key(collision["alias"]) == key:
+            raise _error(f'Project alias "{collision["alias"]}" is ambiguous across configured workspace roots.')
+    choices = ", ".join(item["alias"] for item in found["projects"]) or "none"
+    raise _error(f"Unknown project alias {alias!r}; raw paths are not accepted; registered aliases: {choices}")
+
+
+def _contained(path: Path, root: Path, label: str, *, strict: bool = True) -> Path:
+    try:
+        resolved = path.resolve(strict=strict)
+        resolved.relative_to(root.resolve(strict=True))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _error(f"dynamic project {label} escapes its trusted project directory") from exc
+    return resolved
+
+
+def validate_project_paths(resolved: dict[str, Any]) -> Path:
+    """Revalidate dynamic path authority immediately before trusted reads."""
+    project = Path(resolved["path"])
+    if resolved.get("source") != "workspace":
+        return project
+    root_value = resolved.get("workspace_root")
+    if not isinstance(root_value, str):
+        raise _error("dynamic project workspace root is unavailable")
+    try:
+        root = Path(root_value).resolve(strict=True)
+        current = project.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise _error("dynamic project path is unavailable") from exc
+    if current.parent != root:
+        raise _error("dynamic project is no longer a direct child of its trusted workspace root")
+    agent = current / ".agent"
+    if agent.exists():
+        _contained(agent, current, ".agent")
+    config = agent / "config.json"
+    if config.exists():
+        _contained(config, current, ".agent/config.json")
+    return current
+
+
+def load_registry(path: Path | None = None) -> list[dict[str, Any]]:
+    """Backward-compatible fresh list of resolvable explicit and workspace projects."""
+    return discover_projects(path)["projects"]
 
 
 def _frontmatter(path: Path, kind: str) -> tuple[dict[str, Any], str]:
@@ -132,11 +282,15 @@ def _nonempty_string(data: dict[str, Any], field: str, kind: str, filename: str)
     return value.strip()
 
 
-def _read_tasks(agent: Path) -> list[dict[str, Any]]:
+def _read_tasks(agent: Path, trusted_project: Path | None = None) -> list[dict[str, Any]]:
     tasks: list[dict[str, Any]] = []
     seen: set[str] = set()
     directory = agent / "tasks"
+    if trusted_project is not None and directory.exists():
+        _contained(directory, trusted_project, ".agent/tasks")
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name.casefold()) if directory.is_dir() else []:
+        if trusted_project is not None:
+            _contained(path, trusted_project, f"task {path.name}")
         data, _ = _frontmatter(path, "task")
         values = {field: _nonempty_string(data, field, "task", path.name)
                   for field in ("id", "title", "status", "initiative", "work_item")}
@@ -157,11 +311,15 @@ def _read_tasks(agent: Path) -> list[dict[str, Any]]:
     return tasks
 
 
-def _read_initiatives(agent: Path) -> list[tuple[dict[str, str], str]]:
+def _read_initiatives(agent: Path, trusted_project: Path | None = None) -> list[tuple[dict[str, str], str]]:
     initiatives: list[tuple[dict[str, str], str]] = []
     seen: set[str] = set()
     directory = agent / "initiatives"
+    if trusted_project is not None and directory.exists():
+        _contained(directory, trusted_project, ".agent/initiatives")
     for path in sorted(directory.glob("*.md"), key=lambda p: p.name.casefold()) if directory.is_dir() else []:
+        if trusted_project is not None:
+            _contained(path, trusted_project, f"initiative {path.name}")
         data, body = _frontmatter(path, "initiative")
         values = {field: _nonempty_string(data, field, "initiative", path.name)
                   for field in ("id", "title", "status")}
@@ -250,8 +408,10 @@ def _parse_work_map(body: str, task_ids: set[str]) -> tuple[list[dict[str, Any]]
     return items, warnings
 
 
-def _project_identity(project: Path, alias: str) -> dict[str, Any]:
+def _project_identity(project: Path, alias: str, trusted_project: Path | None = None) -> dict[str, Any]:
     path = project / ".agent" / "project.md"
+    if trusted_project is not None and path.exists():
+        _contained(path, trusted_project, ".agent/project.md")
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -272,9 +432,12 @@ def _project_identity(project: Path, alias: str) -> dict[str, Any]:
     }
 
 
-def _authoritative_vcs(project: Path) -> str:
+def _authoritative_vcs(project: Path, trusted_project: Path | None = None) -> str:
+    path = project / ".agent" / "project.md"
+    if trusted_project is not None and path.exists():
+        _contained(path, trusted_project, ".agent/project.md")
     try:
-        text = (project / ".agent" / "project.md").read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return "unknown"
     match = re.search(r"^\*\*VCS:\*\*\s*(.+?)\s*$", text, re.MULTILINE | re.IGNORECASE)
@@ -318,14 +481,23 @@ def runtime_status(project: Path, snapshot_reader: Callable[[], dict[str, Any]] 
 
 def read_project_status(alias: str, registry_path: Path | None = None,
                         runtime_reader: Callable[[Path], dict[str, Any]] = runtime_status) -> dict[str, Any]:
-    registered = {entry["alias"]: entry for entry in load_registry(registry_path)}
-    if not isinstance(alias, str) or not _ALIAS_RE.fullmatch(alias) or alias not in registered:
-        choices = ", ".join(registered) or "none"
-        raise _error(f"Unknown project alias {alias!r}; raw paths are not accepted; registered aliases: {choices}")
-    project = Path(registered[alias]["path"])
+    resolved = resolve_project(alias, registry_path)
+    display_alias = resolved["alias"]
+    project = validate_project_paths(resolved)
+    trusted_project = project if resolved.get("source") == "workspace" else None
+    if not resolved["initialized"]:
+        return {
+            "project": {"alias": display_alias, "displayName": display_alias,
+                        "purpose": "Not established", "currentTechnology": [], "initialized": False},
+            "workflow": None,
+            "runtime": {"lead": {"agentId": None, "status": "offline"},
+                        "coder": {"agentId": None, "status": "offline"}},
+            "repository": {"path": str(project), "vcs": "unknown"},
+            "warnings": [],
+        }
     agent = project / ".agent"
-    tasks = _read_tasks(agent)
-    initiatives = _read_initiatives(agent)
+    tasks = _read_tasks(agent, trusted_project)
+    initiatives = _read_initiatives(agent, trusted_project)
     active_task = next((task for task in tasks if task["active"]), None)
     completed = [task for task in tasks if task["status"] == "DONE"]
     last_completed = max(completed, key=lambda task: int(_TASK_ID_RE.fullmatch(task["id"]).group(1))) if completed else None
@@ -340,7 +512,7 @@ def read_project_status(alias: str, registry_path: Path | None = None,
     frontier = [item for item in work_items if item["status"] == "PLANNED"
                 and all(states[blocker] == "DONE" for blocker in item["blockedBy"])]
     return {
-        "project": _project_identity(project, alias),
+        "project": _project_identity(project, display_alias, trusted_project),
         "workflow": {
             "activeTask": active_task,
             "lastCompletedTask": last_completed,
@@ -349,14 +521,14 @@ def read_project_status(alias: str, registry_path: Path | None = None,
             "frontier": frontier,
         },
         "runtime": runtime_reader(project),
-        "repository": {"path": str(project), "vcs": _authoritative_vcs(project)},
+        "repository": {"path": str(project), "vcs": _authoritative_vcs(project, trusted_project)},
         "warnings": warnings,
     }
 
 
 def projects_json(registry_path: Path | None = None) -> str:
     try:
-        return json.dumps({"projects": load_registry(registry_path)}, ensure_ascii=False, sort_keys=True)
+        return json.dumps(discover_projects(registry_path), ensure_ascii=False, sort_keys=True)
     except SanbiError as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False, sort_keys=True)
 
@@ -375,11 +547,10 @@ def read_projects_status(
 ) -> dict[str, Any]:
     registry_path = Path(registry_path) if registry_path is not None else default_registry_path()
     status_reader = status_reader or read_project_status
-    projects = []
-    for entry in load_registry(registry_path):
-        status = status_reader(entry["alias"], registry_path, runtime_reader)
-        projects.append({"alias": entry["alias"], "path": entry["path"], "status": status})
-    return {"projects": projects}
+    discovery = discover_projects(registry_path)
+    projects = [{key: entry[key] for key in ("alias", "path", "source", "initialized", "workspace_root")}
+                for entry in discovery["projects"]]
+    return {"projects": projects, "ambiguous": discovery["ambiguous"], "warnings": discovery["warnings"]}
 
 
 def projects_status_json(registry_path: Path | None = None) -> str:
@@ -395,19 +566,15 @@ def format_projects(payload: dict[str, Any]) -> str:
     projects = payload.get("projects", [])
     if not projects:
         return "Projects: none"
-    lines = ["Projects:"]
+    lines = ["Sanbi projects", ""]
     for item in projects:
-        workflow = item["status"]["workflow"]
-        initiative = workflow.get("activeInitiative")
-        active = workflow.get("activeTask")
-        frontier = workflow.get("frontier", [])
-        initiative_text = (f"Initiative {initiative['status']}: {initiative['id']} — {initiative['title']}"
-                           if initiative else "Initiative: none")
-        active_text = (f"Active task: {active['id']} — {active['title']} [{active['status']}]"
-                       if active else "No active implementation task")
-        frontier_text = ", ".join(work["title"] for work in frontier) or "none"
-        lines.extend((f"- {item['alias']} — {initiative_text}", f"  {active_text}",
-                      f"  Frontier: {frontier_text}"))
+        lines.append(f"{item['alias']}  {'initialized' if item.get('initialized') else 'uninitialized'}")
+    for item in payload.get("ambiguous", []):
+        lines.append(f"{item['alias']}  ambiguous")
+    warnings = payload.get("warnings", [])
+    if warnings:
+        lines.append("")
+        lines.extend(f"Warning: {warning}" for warning in warnings)
     return "\n".join(lines)
 
 
@@ -415,6 +582,10 @@ def format_status(payload: dict[str, Any]) -> str:
     if payload.get("error"):
         return str(payload["error"])
     project = payload["project"]
+    if project.get("initialized") is False:
+        return "\n".join((f"Project: {project['displayName']}",
+                           f"Path: {payload['repository']['path']}",
+                           "Sanbi: not initialized", "Runtime: offline"))
     workflow = payload["workflow"]
     active = workflow.get("activeTask")
     completed = workflow.get("lastCompletedTask")

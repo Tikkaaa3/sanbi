@@ -76,6 +76,12 @@ def make_registry(path: Path, projects: dict) -> Path:
     return path
 
 
+def make_workspace_registry(path: Path, roots: list[Path], projects: dict | None = None) -> Path:
+    write(path, json.dumps({"workspace_roots": [str(root) for root in roots],
+                            "projects": projects or {}}))
+    return path
+
+
 def tree_proof(root: Path):
     out = []
     for p in sorted(root.rglob("*"), key=lambda x: str(x).lower()):
@@ -373,7 +379,7 @@ class CoreTests(unittest.TestCase):
                          "Frontier: none", "Warnings:\n- careful"):
             self.assertIn(expected, rendered)
 
-    def test_project_summaries_fresh_read_every_registered_project(self):
+    def test_project_summaries_use_marker_only_without_runtime_or_status_probe(self):
         second = make_project(self.tmp / "second")
         make_registry(self.registry, {"demo": {"path": str(self.project)}, "other": {"path": str(second)}})
         calls = []
@@ -381,13 +387,12 @@ class CoreTests(unittest.TestCase):
             calls.append(alias)
             return core.read_project_status(alias, registry_path, runtime_reader=lambda *_: {})
         payload = core.read_projects_status(self.registry, status_reader=reader, runtime_reader=lambda *_: {})
-        self.assertEqual(calls, ["demo", "other"])
+        self.assertEqual(calls, [])
         rendered = core.format_projects(payload)
-        self.assertIn("demo — Initiative ACTIVE", rendered)
-        self.assertIn("Active task: T-002 — Ready [READY]", rendered)
-        self.assertIn("Frontier: Second", rendered)
+        self.assertIn("demo  initialized", rendered)
+        self.assertIn("other  initialized", rendered)
 
-    def test_project_summary_list_uses_fresh_status_reader_at_call_time(self):
+    def test_project_summary_list_does_not_probe_detailed_status(self):
         calls = []
         original = core.read_project_status
         def reader(alias, registry_path, runtime_reader):
@@ -398,7 +403,7 @@ class CoreTests(unittest.TestCase):
             payload = core.read_projects_status(self.registry, runtime_reader=lambda *_: {})
         finally:
             core.read_project_status = original
-        self.assertEqual(calls, ["demo"])
+        self.assertEqual(calls, [])
         self.assertEqual(payload["projects"][0]["alias"], "demo")
 
     def test_registry_default_prefers_hermes_home_environment(self):
@@ -411,6 +416,106 @@ class CoreTests(unittest.TestCase):
                 os.environ.pop("HERMES_HOME", None)
             else:
                 os.environ["HERMES_HOME"] = old
+
+    def test_workspace_discovers_direct_children_only_and_ignores_files(self):
+        workspace = self.tmp / "Workspace"
+        (workspace / "alpha" / "nested").mkdir(parents=True)
+        (workspace / "beta").mkdir()
+        write(workspace / "not-a-directory.txt", "x")
+        make_workspace_registry(self.registry, [workspace])
+        found = core.discover_projects(self.registry)
+        self.assertEqual([item["alias"] for item in found["projects"]], ["alpha", "beta"])
+        self.assertEqual({item["source"] for item in found["projects"]}, {"workspace"})
+
+    def test_workspace_discovery_is_fresh_for_create_delete_and_initialization(self):
+        workspace = self.tmp / "Workspace"; workspace.mkdir()
+        make_workspace_registry(self.registry, [workspace])
+        self.assertEqual(core.discover_projects(self.registry)["projects"], [])
+        project = workspace / "newgame"; project.mkdir()
+        first = core.discover_projects(self.registry)["projects"]
+        self.assertFalse(first[0]["initialized"])
+        write(project / ".agent/config.json", "{}")
+        self.assertTrue(core.discover_projects(self.registry)["projects"][0]["initialized"])
+        (project / ".agent/config.json").unlink(); (project / ".agent").rmdir(); project.rmdir()
+        self.assertEqual(core.discover_projects(self.registry)["projects"], [])
+
+    def test_explicit_alias_precedes_dynamic_case_insensitively(self):
+        workspace = self.tmp / "Workspace"; dynamic = workspace / "Game"; dynamic.mkdir(parents=True)
+        explicit = make_project(self.tmp / "external")
+        make_workspace_registry(self.registry, [workspace], {"game": {"path": str(explicit)}})
+        resolved = core.resolve_project("GAME", self.registry)
+        self.assertEqual(resolved["source"], "explicit")
+        self.assertEqual(Path(resolved["path"]), explicit.resolve())
+        self.assertEqual([item["alias"] for item in core.discover_projects(self.registry)["projects"]], ["game"])
+
+    def test_explicit_aliases_cannot_differ_only_by_case(self):
+        second = make_project(self.tmp / "second")
+        make_registry(self.registry, {"Foo": {"path": str(self.project)}, "foo": {"path": str(second)}})
+        self.assertRegistryError(self.registry, "case-insensitive duplicate")
+
+    def test_multiple_root_alias_collision_is_ambiguous_and_fails_closed(self):
+        roots = [self.tmp / "a", self.tmp / "b"]
+        for root in roots: (root / "foo").mkdir(parents=True)
+        make_workspace_registry(self.registry, roots)
+        found = core.discover_projects(self.registry)
+        self.assertEqual(found["projects"], [])
+        self.assertEqual(found["ambiguous"][0]["alias"], "foo")
+        with self.assertRaisesRegex(core.SanbiError, 'alias "foo" is ambiguous'):
+            core.resolve_project("FOO", self.registry)
+        payload = json.loads(core.projects_json(self.registry))
+        self.assertEqual(payload["ambiguous"][0]["alias"], "foo")
+
+    def test_dynamic_alias_rejects_paths_and_traversal(self):
+        workspace = self.tmp / "Workspace"; (workspace / "alpha").mkdir(parents=True)
+        make_workspace_registry(self.registry, [workspace])
+        for alias in ("../foo", "..\\foo", r"C:\foo", r"\\host\share", "alpha/beta", "alpha\\beta", ".", ".."):
+            with self.subTest(alias=alias), self.assertRaisesRegex(core.SanbiError, "unsafe project alias"):
+                core.resolve_project(alias, self.registry)
+
+    def test_duplicate_roots_are_deduplicated_and_invalid_roots_warn(self):
+        workspace = self.tmp / "Workspace"; (workspace / "alpha").mkdir(parents=True)
+        missing = self.tmp / "missing"
+        write(self.registry, json.dumps({"workspace_roots": [str(workspace), str(workspace / "."), str(missing)], "projects": {}}))
+        found = core.discover_projects(self.registry)
+        self.assertEqual([item["alias"] for item in found["projects"]], ["alpha"])
+        self.assertEqual(len(found["warnings"]), 1)
+
+    def test_workspace_roots_schema_is_validated(self):
+        for roots in ("not-a-list", [""], [3], ["relative"]):
+            write(self.registry, json.dumps({"workspace_roots": roots, "projects": {}}))
+            self.assertRegistryError(self.registry, "workspace_roots")
+
+    def test_uninitialized_dynamic_status_is_minimal_and_passive(self):
+        workspace = self.tmp / "Workspace"; project = workspace / "newgame"; project.mkdir(parents=True)
+        make_workspace_registry(self.registry, [workspace])
+        calls = []
+        payload = core.read_project_status("NEWGAME", self.registry,
+                                           runtime_reader=lambda path: calls.append(path) or {})
+        self.assertEqual(payload["project"]["displayName"], "newgame")
+        self.assertFalse(payload["project"]["initialized"])
+        self.assertEqual(payload["runtime"], {"lead": {"agentId": None, "status": "offline"},
+                                               "coder": {"agentId": None, "status": "offline"}})
+        self.assertIsNone(payload["workflow"])
+        self.assertEqual(calls, [])
+        self.assertIn("Sanbi: not initialized", core.format_status(payload))
+
+    def test_dynamic_alias_with_spaces_resolves_end_to_end(self):
+        workspace = self.tmp / "Workspace"; project = workspace / "My Project"; project.mkdir(parents=True)
+        make_workspace_registry(self.registry, [workspace])
+        resolved = core.resolve_project("my project", self.registry)
+        self.assertEqual(resolved["alias"], "My Project")
+        self.assertEqual(Path(resolved["path"]), project.resolve())
+
+    def test_symlink_escape_is_not_discovered_when_supported(self):
+        workspace = self.tmp / "Workspace"; workspace.mkdir()
+        outside = self.tmp / "outside"; outside.mkdir()
+        link = workspace / "escape"
+        try:
+            link.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("directory symlinks are unavailable")
+        make_workspace_registry(self.registry, [workspace])
+        self.assertEqual(core.discover_projects(self.registry)["projects"], [])
 
 
 if __name__ == "__main__":

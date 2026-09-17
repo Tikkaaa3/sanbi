@@ -1,12 +1,18 @@
-.PHONY: install update dry-run test test-sanbi test-hermes test-integration check
+.PHONY: install update install-hermes dry-run dry-run-hermes test test-sanbi test-hermes test-integration check
 
 install:
 	./install.sh
 
 update: install
 
+install-hermes:
+	./install.sh --skip-link --skip-config
+
 dry-run:
 	./install.sh --dry-run
+
+dry-run-hermes:
+	./install.sh --skip-link --skip-config --dry-run
 
 test: test-sanbi test-hermes
 

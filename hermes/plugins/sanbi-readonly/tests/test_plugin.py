@@ -157,6 +157,33 @@ class RegistrationTests(unittest.TestCase):
         finally:
             plugin.sanbi_ask_lead = original
 
+    def test_quoted_space_alias_is_supported_without_rewriting_message(self):
+        plugin = importlib.import_module("plugin")
+        original = plugin.sanbi_ask_lead
+        captured = []
+        try:
+            plugin.sanbi_ask_lead = lambda project, message: captured.append((project, message)) or "ok"
+            self.assertEqual(asyncio.run(plugin.lead_command('\"My Project\" preserve  spacing')),
+                             "My Project Lead:\n\nok")
+            self.assertEqual(captured, [("My Project", "preserve  spacing")])
+        finally:
+            plugin.sanbi_ask_lead = original
+
+    def test_quoted_space_alias_works_for_status_and_single_alias_commands(self):
+        plugin = importlib.import_module("plugin")
+        original_status = plugin.sanbi_project_status
+        original_execute = plugin._execute_project
+        calls = []
+        try:
+            plugin.sanbi_project_status = lambda project: json.dumps({"error": project})
+            plugin._execute_project = lambda project: calls.append(project) or "ok"
+            self.assertEqual(asyncio.run(plugin.project_command('\"My Project\"')), "My Project")
+            self.assertEqual(asyncio.run(plugin.execute_command('\"My Project\"')), "ok")
+            self.assertEqual(calls, ["My Project"])
+        finally:
+            plugin.sanbi_project_status = original_status
+            plugin._execute_project = original_execute
+
 
     def test_projects_command_performs_fresh_status_reads(self):
         plugin = importlib.import_module("plugin")

@@ -138,10 +138,37 @@ async function installHermesPlugin() {
   }
 }
 
-async function configureRegistry() {
+async function configureRegistry(command) {
   const registry = path.join(hermesRoot, "sanbi", "projects.json");
-  let value = { projects: {} };
+  let value = { workspace_roots: [], projects: {} };
   if (await exists(registry)) value = JSON.parse(await readFile(registry, "utf8"));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Hermes Sanbi registry must be an object");
+  if (value.workspace_roots === undefined) value.workspace_roots = [];
+  if (!Array.isArray(value.workspace_roots) || !value.workspace_roots.every((entry) => typeof entry === "string" && path.isAbsolute(entry))) {
+    throw new Error("Hermes Sanbi registry workspace_roots must be a list of absolute paths");
+  }
+  if (!value.projects || typeof value.projects !== "object" || Array.isArray(value.projects)) {
+    throw new Error("Hermes Sanbi registry projects must be an object");
+  }
+
+  const rawRoots = process.env.HERMES_SANBI_WORKSPACE_ROOTS;
+  let requestedRoots = [path.dirname(repositoryRoot)];
+  if (rawRoots !== undefined) {
+    try { requestedRoots = JSON.parse(rawRoots); } catch { throw new Error("HERMES_SANBI_WORKSPACE_ROOTS must be a JSON array of absolute paths"); }
+    if (!Array.isArray(requestedRoots)) throw new Error("HERMES_SANBI_WORKSPACE_ROOTS must be a JSON array of absolute paths");
+  }
+  if (!requestedRoots.every((entry) => typeof entry === "string" && entry.trim() && path.isAbsolute(entry))) {
+    throw new Error("HERMES_SANBI_WORKSPACE_ROOTS entries must be absolute paths");
+  }
+  const roots = [];
+  const seenRoots = new Set();
+  for (const entry of [...value.workspace_roots, ...requestedRoots]) {
+    const resolved = path.resolve(entry);
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (!seenRoots.has(key)) { seenRoots.add(key); roots.push(resolved); }
+  }
+  value.workspace_roots = roots;
+
   const alias = (process.env.HERMES_SANBI_PROJECT_ALIAS || "").trim();
   const projectPath = (process.env.HERMES_SANBI_PROJECT_PATH || "").trim();
   if (Boolean(alias) !== Boolean(projectPath)) throw new Error("HERMES_SANBI_PROJECT_ALIAS and HERMES_SANBI_PROJECT_PATH must be set together");
@@ -151,7 +178,15 @@ async function configureRegistry() {
     if (!await exists(path.join(resolved, ".agent"))) throw new Error("HERMES_SANBI_PROJECT_PATH must contain a .agent directory");
     value.projects[alias] = { path: resolved };
   }
-  if (await exists(registry) && !alias) return;
+  const desired = `${JSON.stringify(value, null, 2)}\n`;
+  if (await exists(registry) && desired === await readFile(registry, "utf8")) return;
+  if (!dryRun && command && process.env.HERMES_GATEWAY_MANAGE !== "1") {
+    const status = tryRun(command, [...hermesCommandPrefix, "gateway", "status"]);
+    const output = `${status?.stdout || ""}\n${status?.stderr || ""}`;
+    if (status?.status === 0 && /gateway process running/i.test(output)) {
+      throw new Error("Hermes gateway is running and the Sanbi registry schema must be reloaded. Re-run with HERMES_GATEWAY_MANAGE=1 and configured Telegram credentials so installation can restart and verify the gateway safely.");
+    }
+  }
   console.log(`${dryRun ? "would set" : "install"}  ${registry}`);
   if (dryRun) return;
   if (await exists(registry)) {
@@ -161,7 +196,7 @@ async function configureRegistry() {
     await copyFile(registry, backup);
   }
   await mkdir(path.dirname(registry), { recursive: true });
-  await writeFile(registry, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await writeFile(registry, desired, "utf8");
   changed += 1;
 }
 
@@ -325,9 +360,10 @@ if (!skipHermes) {
   const hermesCommand = ensureHermes();
   await applyHermesConfig(hermesCommand);
   await installHermesPlugin();
-  await configureRegistry();
   const telegramReady = await configureTelegramEnv();
-  finishHermes(hermesCommand, telegramReady);
+  if (process.env.HERMES_GATEWAY_MANAGE === "1") finishHermes(hermesCommand, telegramReady);
+  await configureRegistry(hermesCommand);
+  if (process.env.HERMES_GATEWAY_MANAGE !== "1") finishHermes(hermesCommand, telegramReady);
 }
 
 console.log("");

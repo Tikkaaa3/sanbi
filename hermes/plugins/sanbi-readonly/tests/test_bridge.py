@@ -128,6 +128,45 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(self.ask(t, token_factory=lambda: token), answer)
             self.assertIn(("get", "w:p1"), t.calls)
 
+    def test_dynamic_initialized_alias_uses_canonical_resolver_case_insensitively(self):
+        workspace = self.tmp / "Workspace"; project = workspace / "Dynamic"; (project / ".agent").mkdir(parents=True)
+        (project / ".agent/config.json").write_text(json.dumps({
+            "project": {"key": "dynamic-key"},
+            "herdr": {"leadAgent": "dynamic-lead", "coderAgent": "dynamic-coder"},
+        }), encoding="utf-8")
+        registry = self.tmp / "dynamic-projects.json"
+        registry.write_text(json.dumps({"workspace_roots": [str(workspace)], "projects": {}}), encoding="utf-8")
+        self.assertEqual(bridge._resolve("DYNAMIC", registry),
+                         (project.resolve(), "dynamic-key", "dynamic-lead", "dynamic-coder"))
+
+    def test_dynamic_uninitialized_lead_activates_normal_sanbi_once_then_resolves_identity(self):
+        workspace = self.tmp / "Workspace"; project = workspace / "newgame"; project.mkdir(parents=True)
+        registry = self.tmp / "dynamic-projects.json"
+        registry.write_text(json.dumps({"workspace_roots": [str(workspace)], "projects": {}}), encoding="utf-8")
+        token = "AbCdEf123_-x"
+        transport = FakeTransport(["", f"<<H:{token}>>done<</H:{token}>>"])
+        expected = bridge._identity(agent())
+        original_activate, original_runtime = bridge._activate, bridge._runtime
+        activations = []
+        try:
+            def activate(_transport, root, *_args):
+                activations.append(root)
+                (root / ".agent").mkdir()
+                (root / ".agent/config.json").write_text(json.dumps({
+                    "project": {"key": "demo-key"},
+                    "herdr": {"leadAgent": "lead-id", "coderAgent": "coder-id"},
+                }), encoding="utf-8")
+            bridge._activate = activate
+            bridge._runtime = lambda *_args: (expected, True)
+            clock = Clock()
+            answer = bridge.ask_lead("NEWGAME", "inspect", registry_path=registry,
+                                     transport=transport, token_factory=lambda: token,
+                                     monotonic=clock.monotonic, sleep=clock.sleep)
+            self.assertEqual(answer, "done")
+            self.assertEqual(activations, [project.resolve()])
+        finally:
+            bridge._activate, bridge._runtime = original_activate, original_runtime
+
     def test_forbidden_command_rejects_before_transport(self):
         t = FakeTransport([], listed=[])
         with self.assertRaisesRegex(bridge.BridgeError, "workflow command"):
