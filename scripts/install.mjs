@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { constants } from "node:fs";
-import { access, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -14,11 +14,19 @@ const packageRoot = path.join(repositoryRoot, "sanbi");
 const dryRun = process.argv.includes("--dry-run");
 const skipLink = process.argv.includes("--skip-link");
 const skipConfig = process.argv.includes("--skip-config");
+const skipHermes = process.argv.includes("--skip-hermes");
 
 const piRoot = process.env.PI_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 const herdrRoot = process.env.HERDR_CONFIG_DIR || (process.platform === "win32"
   ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "herdr")
   : path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "herdr"));
+const hermesRoot = process.env.HERMES_HOME || (process.platform === "win32"
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "hermes")
+  : path.join(os.homedir(), ".hermes"));
+const hermesPluginSource = path.join(repositoryRoot, "hermes", "plugins", "sanbi-readonly");
+const hermesPluginDestination = path.join(hermesRoot, "plugins", "sanbi-readonly");
+const hermesManagedConfig = path.join(repositoryRoot, "hermes", "managed-config.json");
+const hermesCommandPrefix = process.env.HERMES_COMMAND_PREFIX ? [process.env.HERMES_COMMAND_PREFIX] : [];
 
 const managed = [
   ["pi_config/settings.json", piRoot, "settings.json"],
@@ -90,6 +98,140 @@ function run(command, args, options = {}) {
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed:\n${result.stderr || result.stdout}`);
   return result.stdout.trim();
+}
+
+function tryRun(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8", stdio: "pipe", windowsHide: true });
+  return result.error ? null : result;
+}
+
+async function filesBelow(root, relative = "") {
+  const entries = await readdir(path.join(root, relative), { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    if (entry.name === "__pycache__" || entry.name.endsWith(".pyc")) continue;
+    const child = path.join(relative, entry.name);
+    if (entry.isDirectory()) files.push(...await filesBelow(root, child));
+    else if (entry.isFile()) files.push(child);
+  }
+  return files;
+}
+
+async function installHermesPlugin() {
+  if (!await exists(hermesPluginSource)) throw new Error("missing repository Hermes plugin");
+  console.log(`${dryRun ? "would install" : "install"} Hermes plugin ${hermesPluginDestination}`);
+  if (dryRun) return;
+  for (const relative of await filesBelow(hermesPluginSource)) {
+    const source = path.join(hermesPluginSource, relative);
+    const destination = path.join(hermesPluginDestination, relative);
+    const desired = await readFile(source);
+    if (await exists(destination) && createHash("sha256").update(desired).digest("hex") === createHash("sha256").update(await readFile(destination)).digest("hex")) continue;
+    if (await exists(destination)) {
+      backupRoot ||= path.join(piRoot, ".sanbi-backups", timestamp);
+      const backup = path.join(backupRoot, "hermes", "plugins", "sanbi-readonly", relative);
+      await mkdir(path.dirname(backup), { recursive: true });
+      await copyFile(destination, backup);
+    }
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    changed += 1;
+  }
+}
+
+async function configureRegistry() {
+  const registry = path.join(hermesRoot, "sanbi", "projects.json");
+  let value = { projects: {} };
+  if (await exists(registry)) value = JSON.parse(await readFile(registry, "utf8"));
+  const alias = (process.env.HERMES_SANBI_PROJECT_ALIAS || "").trim();
+  const projectPath = (process.env.HERMES_SANBI_PROJECT_PATH || "").trim();
+  if (Boolean(alias) !== Boolean(projectPath)) throw new Error("HERMES_SANBI_PROJECT_ALIAS and HERMES_SANBI_PROJECT_PATH must be set together");
+  if (alias) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(alias)) throw new Error("HERMES_SANBI_PROJECT_ALIAS is invalid");
+    const resolved = path.resolve(projectPath);
+    if (!await exists(path.join(resolved, ".agent"))) throw new Error("HERMES_SANBI_PROJECT_PATH must contain a .agent directory");
+    value.projects[alias] = { path: resolved };
+  }
+  if (await exists(registry) && !alias) return;
+  console.log(`${dryRun ? "would set" : "install"}  ${registry}`);
+  if (dryRun) return;
+  if (await exists(registry)) {
+    backupRoot ||= path.join(piRoot, ".sanbi-backups", timestamp);
+    const backup = path.join(backupRoot, "hermes", "sanbi", "projects.json");
+    await mkdir(path.dirname(backup), { recursive: true });
+    await copyFile(registry, backup);
+  }
+  await mkdir(path.dirname(registry), { recursive: true });
+  await writeFile(registry, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  changed += 1;
+}
+
+async function configureTelegramEnv() {
+  const token = process.env.HERMES_TELEGRAM_BOT_TOKEN;
+  const users = process.env.HERMES_TELEGRAM_ALLOWED_USERS;
+  if (!token && !users) return false;
+  if (!token || !users) throw new Error("HERMES_TELEGRAM_BOT_TOKEN and HERMES_TELEGRAM_ALLOWED_USERS must be set together");
+  const envPath = path.join(hermesRoot, ".env");
+  const content = await exists(envPath) ? await readFile(envPath, "utf8") : "";
+  if (/^TELEGRAM_BOT_TOKEN=/m.test(content) || /^TELEGRAM_ALLOWED_USERS=/m.test(content)) {
+    console.log("preserve existing Telegram credentials in Hermes .env");
+    return /^TELEGRAM_BOT_TOKEN=.+/m.test(content) && /^TELEGRAM_ALLOWED_USERS=.+/m.test(content);
+  }
+  console.log(`${dryRun ? "would configure" : "configure"} Telegram credentials (values hidden)`);
+  if (dryRun) return true;
+  await mkdir(hermesRoot, { recursive: true });
+  const separator = content && !content.endsWith("\n") ? "\n" : "";
+  await writeFile(envPath, `${content}${separator}TELEGRAM_BOT_TOKEN=${token}\nTELEGRAM_ALLOWED_USERS=${users}\n`, { encoding: "utf8", mode: 0o600 });
+  changed += 1;
+  return true;
+}
+
+function resolveHermesCommand() {
+  if (process.env.HERMES_COMMAND) return process.env.HERMES_COMMAND;
+  if (tryRun("hermes", ["--version"])?.status === 0) return "hermes";
+  const installed = path.join(hermesRoot, "bin", process.platform === "win32" ? "hermes.exe" : "hermes");
+  return tryRun(installed, ["--version"])?.status === 0 ? installed : null;
+}
+
+function ensureHermes() {
+  let command = resolveHermesCommand();
+  if (command || dryRun) {
+    if (dryRun && !command) console.log("would install Hermes using the official Nous Research installer");
+    return command;
+  }
+  if (process.platform !== "win32") throw new Error("Hermes is missing; install it with https://hermes-agent.nousresearch.com/install.sh");
+  console.log("install  Hermes using the official Nous Research Windows installer");
+  run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+    "& ([scriptblock]::Create((Invoke-RestMethod 'https://hermes-agent.nousresearch.com/install.ps1'))) -SkipSetup"]);
+  command = resolveHermesCommand();
+  if (!command) throw new Error("official Hermes installer completed but hermes is unavailable");
+  return command;
+}
+
+async function applyHermesConfig(command) {
+  const manifest = JSON.parse(await readFile(hermesManagedConfig, "utf8"));
+  if (manifest.version !== 1 || !Array.isArray(manifest.settings)) throw new Error("invalid Hermes managed config manifest");
+  for (const setting of manifest.settings) {
+    if (!setting || typeof setting.key !== "string" || !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(setting.key)) {
+      throw new Error("invalid key in Hermes managed config manifest");
+    }
+    if (!["string", "number", "boolean"].includes(typeof setting.value)) throw new Error(`invalid value for Hermes managed config key ${setting.key}`);
+    const value = String(setting.value);
+    if (dryRun) console.log(`would run hermes config set ${setting.key} ${value}`);
+    else run(command, [...hermesCommandPrefix, "config", "set", setting.key, value]);
+  }
+}
+
+function finishHermes(command, telegramReady) {
+  if (dryRun || !command) return;
+  const hermes = (args) => run(command, [...hermesCommandPrefix, ...args]);
+  hermes(["plugins", "doctor", "--ci", hermesPluginDestination]);
+  hermes(["plugins", "enable", "--no-allow-tool-override", "sanbi-readonly"]);
+  if (process.env.HERMES_GATEWAY_MANAGE !== "1") return;
+  if (!telegramReady) throw new Error("HERMES_GATEWAY_MANAGE=1 requires configured Telegram credentials");
+  const status = hermes(["gateway", "status"]);
+  if (/No gateway service installed/i.test(status)) hermes(["gateway", "install", "--start-now"]);
+  else hermes(["gateway", "restart"]);
+  hermes(["gateway", "status", "--deep"]);
 }
 
 function pathContains(entries, candidate) {
@@ -179,6 +321,14 @@ if (!skipConfig) {
   for (const entry of managed) await installManagedFile(...entry);
 }
 if (!skipLink) await installExecutable();
+if (!skipHermes) {
+  const hermesCommand = ensureHermes();
+  await applyHermesConfig(hermesCommand);
+  await installHermesPlugin();
+  await configureRegistry();
+  const telegramReady = await configureTelegramEnv();
+  finishHermes(hermesCommand, telegramReady);
+}
 
 console.log("");
 if (dryRun) {

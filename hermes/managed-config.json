@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "settings": [
+    { "key": "model.default", "value": "gpt-5.6-luna" },
+    { "key": "model.provider", "value": "openai-codex" },
+    { "key": "agent.reasoning_effort", "value": "low" },
+    { "key": "agent.max_turns", "value": 500 },
+    { "key": "terminal.backend", "value": "local" },
+    { "key": "gateway.trust_env", "value": true },
+    { "key": "gateway.loop_watchdog", "value": true },
+    { "key": "gateway.loop_watchdog_probe_interval_s", "value": 30 },
+    { "key": "gateway.loop_watchdog_probe_timeout_s", "value": 10 },
+    { "key": "gateway.loop_watchdog_max_strikes", "value": 3 },
+    { "key": "gateway.startup_watchdog", "value": true },
+    { "key": "gateway.startup_watchdog_timeout_seconds", "value": 300 }
+  ]
+}

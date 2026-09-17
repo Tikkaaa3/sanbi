@@ -1,0 +1,10 @@
+name: sanbi-readonly
+version: 3.3.0
+description: Deterministic Sanbi status, Lead communication, lifecycle dispatch, and task proposal approval
+provides_tools:
+  - sanbi_projects
+  - sanbi_project_status
+  - sanbi_ask_lead
+
+provides_hooks:
+  - pre_llm_call

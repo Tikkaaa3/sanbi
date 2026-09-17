@@ -498,3 +498,69 @@ The repository intentionally does not contain:
 - Generated Herdr Pi integration code.
 
 The installer backs up and replaces only declared managed files. Sanbi cleanup deletes only positively identified Sanbi-owned paths and processes. Application code, tests, project artifacts, and unrelated global configuration remain outside installer ownership.
+
+## Portable Hermes, Telegram, and Sanbi integration
+
+The `hermes/` directory vendors the complete `sanbi-readonly` plugin and its tests, plus credential-free setup examples:
+
+```text
+hermes/
+├── .env.example
+├── sanbi/projects.example.json
+└── plugins/sanbi-readonly/
+    ├── plugin.yaml
+    ├── __init__.py
+    ├── core.py
+    ├── bridge.py
+    ├── plugin.py
+    └── tests/
+```
+
+A normal `make install` or `./install.sh` now provisions Pi, Herdr, Sanbi, and Hermes. If Hermes is absent on native Windows, the installer uses Nous Research's official PowerShell installer with `-SkipSetup`. It copies only the vendored plugin, runs Plugin Doctor, and enables `sanbi-readonly` without tool-override permission. Existing Hermes configuration, provider credentials, auth, sessions, memories, logs, caches, plugins, and unrelated files are not replaced.
+
+The installer creates an empty `%LOCALAPPDATA%/hermes/sanbi/projects.json` only when no registry exists. Registering a project is explicit; set both variables before installation:
+
+```bash
+export HERMES_SANBI_PROJECT_ALIAS='my-project'
+export HERMES_SANBI_PROJECT_PATH='C:/absolute/path/to/project'
+./install.sh
+```
+
+No workstation-specific project path is included in this repository. Existing registry entries are preserved and the explicit alias is merged.
+
+### Telegram credentials
+
+Create a bot with Telegram's `@BotFather`, determine the permitted Telegram user ID, and provide both values through the process environment. Do not place real values in this repository:
+
+```bash
+export HERMES_TELEGRAM_BOT_TOKEN='set-at-install-time'
+export HERMES_TELEGRAM_ALLOWED_USERS='123456789'
+./install.sh
+```
+
+The values are written to Hermes' local `.env` without being printed. If either Telegram key already exists there, the installer preserves the existing local values rather than overwriting credentials. You can instead configure Telegram after installation with the Hermes dashboard or `hermes gateway setup`.
+
+Gateway lifecycle changes are opt-in. The installer does not start, restart, or install a gateway unless Telegram is configured and `HERMES_GATEWAY_MANAGE=1` is set. With that explicit opt-in it installs/starts an absent gateway or restarts an existing one, then runs `hermes gateway status --deep`:
+
+```bash
+export HERMES_GATEWAY_MANAGE=1
+./install.sh
+```
+
+Preview all managed changes safely with `make dry-run`. The dry run never installs Hermes, invokes Hermes, writes credentials, changes plugin state, or touches the gateway.
+
+Hermes plugin tests are included in the default `make test` target. Run them separately with `make test-hermes`. Real secrets, auth files, project registries, sessions, runtime history, logs, caches, backups, and `__pycache__` are intentionally excluded.
+
+### Managed Hermes settings
+
+`hermes/managed-config.json` is the credential-free, portable manifest for the Hermes settings this repository owns. The installer applies each dotted key with the official `hermes config set KEY VALUE` command after Hermes is available and before plugin validation, enablement, or gateway management. This updates only the declared keys; unrelated `config.yaml` fields, `.env`, `auth.json`, OAuth credentials, and other local state remain outside repository ownership.
+
+The managed settings select the existing `gpt-5.6-luna` model on the `openai-codex` provider, low reasoning effort, a 500-turn limit, the local terminal backend, trusted gateway environment loading, and the standard gateway loop/startup watchdog values. Plugin state remains explicit: the installer enables `sanbi-readonly` with tool override disabled and does not disable or replace other plugins such as `herdr-agent-state`.
+
+Provider authentication is never copied or automated by this repository. Complete the normal OpenAI Codex OAuth flow manually after installation when needed:
+
+```bash
+hermes auth add openai-codex
+```
+
+`--dry-run` reads the manifest and prints every intended `hermes config set` operation, but it does not invoke Hermes or write any Hermes files.
