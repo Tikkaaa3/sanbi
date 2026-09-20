@@ -106,7 +106,7 @@ export async function adoptProject(projectDirectory) {
       project: { key: projectKey, root: absoluteRoot },
       roles: {
         lead: { model: "openai-codex/gpt-5.6-sol", thinking: "high" },
-        coder: { model: "openai-codex/gpt-5.6-sol", thinking: "low" },
+        coder: { model: "openai-codex/gpt-5.6-luna", thinking: "xhigh" },
       },
       herdr: { leadAgent: agentNames(projectKey).lead, coderAgent: agentNames(projectKey).coder },
     };

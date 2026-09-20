@@ -188,6 +188,11 @@ On first adoption Sanbi:
 
 Normal startup is non-destructive. It never replaces existing managed infrastructure merely because a newer scaffold exists.
 
+Current changed model defaults:
+
+- Coder: `openai-codex/gpt-5.6-luna` with `xhigh` thinking.
+- Researcher: `openai-codex/gpt-5.6-luna` with `high` thinking.
+
 Useful CLI options:
 
 | Option | Purpose |

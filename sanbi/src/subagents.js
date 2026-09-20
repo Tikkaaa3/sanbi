@@ -3,7 +3,7 @@ import path from "node:path";
 
 export const SUBAGENT_PROFILES = Object.freeze({
   scout: Object.freeze({ model: "openai-codex/gpt-5.6-luna", thinking: "medium", tools: Object.freeze(["read", "grep", "find", "ls"]) }),
-  researcher: Object.freeze({ model: "openai-codex/gpt-5.6-terra", thinking: "medium", tools: Object.freeze(["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"]) }),
+  researcher: Object.freeze({ model: "openai-codex/gpt-5.6-luna", thinking: "high", tools: Object.freeze(["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"]) }),
   reviewer: Object.freeze({ model: "openai-codex/gpt-5.6-sol", thinking: "high", tools: Object.freeze(["read", "grep", "find", "ls", "bash"]) }),
   "diagnostic-scout": Object.freeze({ model: "openai-codex/gpt-5.6-sol", thinking: "medium", tools: Object.freeze(["read", "grep", "find", "ls", "bash"]) }),
 });

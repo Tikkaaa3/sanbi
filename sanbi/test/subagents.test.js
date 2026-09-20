@@ -29,7 +29,7 @@ test("Subagent V2 profiles use exact models, thinking, and leaf tool sets", asyn
   const lead = await loadSubagentRegistry(root, "lead", { resolveModel: async (id) => id.startsWith("openai-codex/gpt-5.6-") });
   const coder = await loadSubagentRegistry(root, "coder");
   assert.deepEqual(SUBAGENT_PROFILES.scout, { model: "openai-codex/gpt-5.6-luna", thinking: "medium", tools: ["read", "grep", "find", "ls"] });
-  assert.deepEqual(SUBAGENT_PROFILES.researcher, { model: "openai-codex/gpt-5.6-terra", thinking: "medium", tools: ["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"] });
+  assert.deepEqual(SUBAGENT_PROFILES.researcher, { model: "openai-codex/gpt-5.6-luna", thinking: "high", tools: ["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"] });
   assert.deepEqual(SUBAGENT_PROFILES.reviewer, { model: "openai-codex/gpt-5.6-sol", thinking: "high", tools: ["read", "grep", "find", "ls", "bash"] });
   assert.deepEqual(SUBAGENT_PROFILES["diagnostic-scout"], { model: "openai-codex/gpt-5.6-sol", thinking: "medium", tools: ["read", "grep", "find", "ls", "bash"] });
   for (const definition of [...lead.values(), ...coder.values()]) {

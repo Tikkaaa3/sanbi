@@ -63,7 +63,7 @@ test("adopts an empty directory and creates the canonical V1 infrastructure", as
   assert.match(protocol, /There is no separate `REWORK` state/);
   assert.match(protocol, /`REVIEW -> CODING`/);
   assert.deepEqual(result.config.roles.lead, { model: "openai-codex/gpt-5.6-sol", thinking: "high" });
-  assert.deepEqual(result.config.roles.coder, { model: "openai-codex/gpt-5.6-sol", thinking: "low" });
+  assert.deepEqual(result.config.roles.coder, { model: "openai-codex/gpt-5.6-luna", thinking: "xhigh" });
   assert.ok(roleEnv(result.config, "lead").includes("SANBI_ROLE=lead"));
   assert.ok(roleEnv(result.config, "coder").includes("SANBI_ROLE=coder"));
   assert.ok(roleEnv(result.config, "lead").includes("SANBI_SUBAGENT_V2=1"));
@@ -117,7 +117,7 @@ test("loads canonical Lead and shared skill roots without changing Pi model conf
   const leadArgs = await buildPiLaunchArgs(adopted, "lead");
   const coderArgs = await buildPiLaunchArgs(adopted, "coder");
   assert.deepEqual(leadArgs, ["--approve", "--thinking", "high", "--model", "openai-codex/gpt-5.6-sol", "--skill", leadRoot, "--skill", sharedRoot]);
-  assert.deepEqual(coderArgs, ["--approve", "--thinking", "low", "--model", "openai-codex/gpt-5.6-sol", "--skill", coderRoot, "--skill", sharedRoot]);
+  assert.deepEqual(coderArgs, ["--approve", "--thinking", "xhigh", "--model", "openai-codex/gpt-5.6-luna", "--skill", coderRoot, "--skill", sharedRoot]);
   assert.equal(leadArgs.includes(coderRoot), false);
   assert.equal(coderArgs.includes(leadRoot), false);
   assert.equal(leadArgs.includes(sharedRoot), true, "Lead must receive codebase-design through the shared root");

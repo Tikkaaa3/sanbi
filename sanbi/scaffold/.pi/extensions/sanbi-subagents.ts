@@ -26,7 +26,7 @@ const ROLES = {
 } as const;
 const PROFILES: Record<string, { model: string; thinking: ThinkingLevel; tools: string[] }> = {
   scout: { model: "openai-codex/gpt-5.6-luna", thinking: "medium", tools: ["read", "grep", "find", "ls"] },
-  researcher: { model: "openai-codex/gpt-5.6-terra", thinking: "medium", tools: ["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"] },
+  researcher: { model: "openai-codex/gpt-5.6-luna", thinking: "high", tools: ["read", "grep", "find", "ls", "web_search", "fetch_content", "source_check", "get_search_content"] },
   reviewer: { model: "openai-codex/gpt-5.6-sol", thinking: "high", tools: ["read", "grep", "find", "ls", "bash"] },
   "diagnostic-scout": { model: "openai-codex/gpt-5.6-sol", thinking: "medium", tools: ["read", "grep", "find", "ls", "bash"] },
 };

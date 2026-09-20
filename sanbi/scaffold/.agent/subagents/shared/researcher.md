@@ -1,8 +1,8 @@
 ---
 name: researcher
 description: Source-grounded external technical research.
-model: openai-codex/gpt-5.6-terra
-thinking: medium
+model: openai-codex/gpt-5.6-luna
+thinking: high
 tools: read,grep,find,ls,web_search,fetch_content,source_check,get_search_content
 ---
 
